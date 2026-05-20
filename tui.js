@@ -477,7 +477,7 @@ function getPluginActions(pitem) {
 }
 
 function outputDir(dir) {
-  var outFile = process.env.OC_OUTPUT;
+  var outFile = process.env.HUB_OUTPUT || process.env.OC_OUTPUT || process.env.CC_OUTPUT;
   if (outFile) {
     writeFileSync(outFile, dir, "utf-8");
   } else {
