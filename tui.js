@@ -244,7 +244,7 @@ function buildPluginList() {
     var folderName = getFolderName(p);
     var dir = join(REPOS_DIR, folderName);
     var installed = existsSync(dir);
-    var deployed = existsSync(join(PLUGINS_DIR, p.pluginFile));
+    var deployed = existsSync(join(PLUGINS_DIR, (p.pluginFile || "plugin.js")));
     var localHead = "";
     var remoteHead = "";
     var subject = "";
@@ -1035,7 +1035,7 @@ function handlePluginKey(key) {
         var plugins = loadPlugins();
         var match = plugins.find(function(r) { return r.name === p.name; });
         if (match) { match.enabled = false; savePlugins(plugins); }
-        var deployedPath = join(PLUGINS_DIR, p.pluginFile);
+        var deployedPath = join(PLUGINS_DIR, (p.pluginFile || "plugin.js"));
         if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
         pluginItems = buildCombinedPluginList();
         if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
