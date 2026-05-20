@@ -6,6 +6,11 @@ import { join, dirname } from "path";
 import { homedir } from "os";
 
 var HOME = homedir();
+var APP_NAME = process.env.HUB_APP_NAME || "OpenCode";
+var CLI_CMD = process.env.HUB_CLI_CMD || "opencode";
+var NPM_PKG = process.env.HUB_NPM_PKG || "opencode-ai";
+var CACHE_PKG_DIR = process.env.HUB_CACHE_PKG_DIR || join(homedir(), ".cache", "opencode", "node_modules");
+
 var CONFIG_DIR = process.env.HUB_CONFIG_DIR || join(HOME, ".config", "opencode");
 var DB_PATH = join(HOME, ".local", "share", "opencode", "opencode.db");
 var CONFIG_FOLDER = join(CONFIG_DIR, "config");
@@ -99,13 +104,13 @@ function checkForUpdates() {
     if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
     writeFileSync(UPDATE_CHECK_PATH, String(Date.now()));
 
-    var installed = execSync("opencode --version", { encoding: "utf-8", timeout: 10000 }).trim();
-    var latest = execSync("npm view opencode-ai version", { encoding: "utf-8", timeout: 15000 }).trim();
+    var installed = execSync(CLI_CMD + " --version", { encoding: "utf-8", timeout: 10000 }).trim();
+    var latest = execSync("npm view " + NPM_PKG + " version", { encoding: "utf-8", timeout: 15000 }).trim();
 
     if (!latest || !installed || latest === installed) return;
 
     process.stderr.write("\x1b[33m  > Updating OpenCode: " + installed + " -> " + latest + "\x1b[0m\n");
-    execSync("npm install -g opencode-ai@latest", { stdio: "inherit", timeout: 120000 });
+    execSync("npm install -g " + NPM_PKG + "@latest", { stdio: "inherit", timeout: 120000 });
     process.stderr.write("\x1b[32m  > Updated to " + latest + "\x1b[0m\n\n");
   } catch (e) {}
 }
@@ -435,7 +440,7 @@ function flash(msg) {
 
 function getActions(item) {
   var a = [
-    { key: "open", label: "Open in OpenCode", icon: ">" },
+    { key: "open", label: "Open in " + APP_NAME, icon: ">" },
   ];
   if (item.pinned) {
     a.push({ key: "unpin", label: "Unpin from favorites", icon: "x" });
@@ -622,7 +627,7 @@ function buildProjects(pushBody, pushFoot, cols, barW) {
 
   if (items.length === 0) {
     pushBody("  " + GRAY + "No projects found." + RST, false);
-    pushBody("  " + GRAY + "Use OpenCode in a directory first, then come back." + RST, false);
+    pushBody("  " + GRAY + "Use " + APP_NAME + " in a directory first, then come back." + RST, false);
     pushBody("", false);
     
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
@@ -857,7 +862,7 @@ function render() {
 
   // 1. Build Header
   pushHead("");
-  pushHead("  " + BOLD + CYAN + " OpenCode" + RST + GRAY + "  Launcher" + RST);
+  pushHead("  " + BOLD + CYAN + " " + APP_NAME + RST + GRAY + "  Launcher" + RST);
   pushHead("  " + GRAY + "-".repeat(barW) + RST);
   var showPluginsTab = pluginItems.length > 0;
   var projTab = page === "projects" ? (BOLD + WHITE + BG_SEL + " Projects " + RST) : (GRAY + " Projects " + RST);
