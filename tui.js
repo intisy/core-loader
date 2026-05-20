@@ -6,7 +6,7 @@ import { join, dirname } from "path";
 import { homedir } from "os";
 
 var HOME = homedir();
-var CONFIG_DIR = join(HOME, ".config", "opencode");
+var CONFIG_DIR = process.env.HUB_CONFIG_DIR || join(HOME, ".config", "opencode");
 var DB_PATH = join(HOME, ".local", "share", "opencode", "opencode.db");
 var CONFIG_FOLDER = join(CONFIG_DIR, "config");
 var CACHE_DIR = join(CONFIG_DIR, "cache");
