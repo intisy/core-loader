@@ -136,6 +136,38 @@ function saveConfig(cfg) {
 }
 
 function queryProjects() {
+  if (APP_NAME === "Claude Code") {
+    var historyPath = join(CONFIG_DIR, "history.jsonl");
+    if (!existsSync(historyPath)) return [];
+    try {
+      var lines = readFileSync(historyPath, "utf8").split("\n").filter(Boolean);
+      var projects = {};
+      for (var line of lines) {
+        try {
+          var parsed = JSON.parse(line);
+          if (parsed.project) {
+            if (!projects[parsed.project]) {
+              projects[parsed.project] = { last_used: 0, sessions: new Set() };
+            }
+            if (parsed.timestamp > projects[parsed.project].last_used) {
+              projects[parsed.project].last_used = parsed.timestamp;
+            }
+            if (parsed.sessionId) {
+              projects[parsed.project].sessions.add(parsed.sessionId);
+            }
+          }
+        } catch (e) {}
+      }
+      return Object.keys(projects).map(function(dir) {
+        return {
+          directory: dir,
+          last_used: projects[dir].last_used,
+          sessions: projects[dir].sessions.size
+        };
+      }).sort(function(a, b) { return b.last_used - a.last_used; }).slice(0, 30);
+    } catch (e) { return []; }
+  }
+
   if (!existsSync(DB_PATH)) return [];
   try {
     var db = new Database(DB_PATH, { readonly: true });
@@ -145,7 +177,7 @@ function queryProjects() {
     ).all();
     db.close();
     return rows;
-  } catch { return []; }
+  } catch (e) { return []; }
 }
 
 function timeAgo(ts) {
