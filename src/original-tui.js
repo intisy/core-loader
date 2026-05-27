@@ -1238,6 +1238,14 @@ process.on("SIGINT", function() { cleanup(); process.exit(1); });
 process.on("SIGTERM", function() { cleanup(); process.exit(1); });
 try { process.stderr.on("resize", function() { render(); }); } catch(e) {}
 
+
+// --- INJECTED AUTH LOGIN INTERCEPTION ---
+if (process.argv[2] === "auth" && process.argv[3] === "login") {
+  var _code = require("child_process").spawnSync(process.argv[0], [require("path").join(__dirname, "oc-auth.js")], { stdio: "inherit" }).status;
+  if (_code !== 42) process.exit(0);
+}
+// ----------------------------------------
+
 // Direct argument handling (skip TUI)
 var arg = process.argv[2];
 if (arg) {

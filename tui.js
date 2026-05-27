@@ -284,11 +284,14 @@ function buildPluginList() {
     var latestTag = "";
     var enabled = p.enabled !== false;
 
-    if (installed) {
-      localHead = gitText(["git", "rev-parse", "HEAD"], dir);
-      subject = gitText(["git", "log", "-1", "--format=%s"], dir);
-      latestTag = gitText(["git", "describe", "--tags", "--abbrev=0"], dir);
-    }
+      if (installed) {
+        localHead = gitText(["git", "rev-parse", "HEAD"], dir);
+        subject = gitText(["git", "log", "-1", "--format=%s"], dir);
+        
+        var desc = gitText(["git", "describe", "--tags", "--always"], dir);
+        var match = desc.match(/^(.*)-\d+-g([0-9a-f]+)$/);
+        latestTag = match ? match[2] + " (" + match[1] + ")" : desc;
+      }
 
     list.push({
       name: p.name,
@@ -1274,6 +1277,14 @@ process.on("exit", function() { showCur(); });
 process.on("SIGINT", function() { cleanup(); process.exit(1); });
 process.on("SIGTERM", function() { cleanup(); process.exit(1); });
 try { process.stderr.on("resize", function() { render(); }); } catch(e) {}
+
+
+// --- INJECTED AUTH LOGIN INTERCEPTION ---
+if (process.argv[2] === "auth" && process.argv[3] === "login") {
+  var _code = require("child_process").spawnSync(process.argv[0], [require("path").join(__dirname, "oc-auth.js")], { stdio: "inherit" }).status;
+  if (_code !== 42) process.exit(0);
+}
+// ----------------------------------------
 
 // Direct argument handling (skip TUI)
 var arg = process.argv[2];
