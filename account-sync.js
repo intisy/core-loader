@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // Account sync & rate-limit reset (shared between claude-hub and opencode-hub)
 // ---------------------------------------------------------------------------
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
-import { homedir } from "os";
+const { existsSync, readFileSync, writeFileSync, mkdirSync } = require("fs");
+const { join, dirname } = require("path");
+const { homedir } = require("os");
 
 var HOME = homedir();
 
@@ -87,7 +87,7 @@ function mergeAccountStorage(existing, incoming) {
  * Reads from all paths, merges into one combined set, writes back to all existing paths.
  * Returns { count, source } where count is number of unique accounts and source is the primary path.
  */
-export async function syncAccounts() {
+function syncAccounts() {
   var paths = getAccountPaths();
   var merged = { version: 4, accounts: [], activeIndex: 0 };
   var source = null;
@@ -128,7 +128,7 @@ export async function syncAccounts() {
  * Reset rate limits on all accounts across all known config locations.
  * Returns the number of files updated.
  */
-export async function resetRateLimits() {
+function resetRateLimits() {
   var paths = getAccountPaths();
   var cleared = 0;
 
@@ -164,3 +164,4 @@ export async function resetRateLimits() {
 
   return cleared;
 }
+module.exports = { syncAccounts, resetRateLimits }; 
