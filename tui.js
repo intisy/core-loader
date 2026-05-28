@@ -276,7 +276,7 @@ function buildPluginList() {
     var folderName = getFolderName(p);
     var dir = join(REPOS_DIR, folderName);
     var installed = existsSync(dir);
-    var deployed = existsSync(join(PLUGINS_DIR, (p.pluginFile || "plugin.js")));
+    var deployed = (!p.pluginFile && !p.output) ? true : existsSync(join(PLUGINS_DIR, (p.pluginFile || "plugin.js")));
     var localHead = "";
     var remoteHead = "";
     var subject = "";
@@ -287,10 +287,16 @@ function buildPluginList() {
       if (installed) {
         localHead = gitText(["git", "rev-parse", "HEAD"], dir);
         subject = gitText(["git", "log", "-1", "--format=%s"], dir);
-        
         var desc = gitText(["git", "describe", "--tags", "--always"], dir);
-        var match = desc.match(/^(.*)-\d+-g([0-9a-f]+)$/);
-        latestTag = match ? match[2] + " (" + match[1] + ")" : desc;
+        if (desc && desc.indexOf("-") !== -1) {
+          var tmatch = desc.match(/^(.*)-\d+-g([0-9a-f]+)$/);
+          if (tmatch) { latestTag = tmatch[2] + " (" + tmatch[1] + ")"; }
+          else { latestTag = desc; }
+        } else if (desc && /^v?\d/.test(desc)) {
+          latestTag = desc;
+        } else {
+          latestTag = "";
+        }
       }
 
     list.push({
@@ -477,6 +483,17 @@ function saveMcpConfig(config) {
   } catch {}
 }
 
+function getInstalledMcpList() {
+  var config = loadMcpConfig();
+  var servers = config.mcpServers || {};
+  var list = [];
+  for (var name of Object.keys(servers)) {
+    var s = servers[name];
+    list.push({ name: name, command: s.command || "", args: s.args || [], env: s.env || {}, installed: true });
+  }
+  return list;
+}
+
 function buildMcpList(categoryFilter) {
   var installed = loadMcpConfig().mcpServers || {};
   var list = [];
@@ -547,6 +564,30 @@ function installMarketplacePlugin(entry) {
   return null;
 }
 
+function buildProviderList() {
+  var list = [];
+  // Builtin provider (always available)
+  var config = loadConfig();
+  var activeProvider = (config && config.activeProvider) || "builtin";
+  list.push({ name: "Built-in " + APP_NAME, desc: "Default " + APP_NAME + " authentication", active: activeProvider === "builtin", id: "builtin" });
+  // Scan installed plugins for auth providers
+  var plugins = loadPlugins();
+  for (var p of plugins) {
+    if (p.name.indexOf("antigravity-auth") !== -1) {
+      list.push({ name: p.name, desc: "Multi-account auth & proxy failover", active: activeProvider === p.name, id: p.name });
+    }
+  }
+  return list;
+}
+
+function setActiveProvider(providerId) {
+  var config = loadConfig();
+  config.activeProvider = providerId;
+  saveConfig(config);
+  // Update all provider items
+  providerItems = buildProviderList();
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -603,14 +644,20 @@ var cscrollOff = 0;
 var mcpItems = buildMcpList("All");
 var mcpCursor = 0;
 var mcpScrollOff = 0;
-var mcpCategoryIdx = 0;
+var mcpSubPage = "installed"; // "installed" | "marketplace"
 var mcpMode = "catalog"; // "catalog" | "actions"
 var mcpAcursor = 0;
 // Marketplace state
 var marketplaceItems = buildMarketplaceList();
 var mkCursor = 0;
 var mkScrollOff = 0;
-var pluginSubPage = "installed"; // "installed" | "marketplace"
+var pluginSubPage = "installed"; // "installed" | "marketplace" | "provider"
+// Provider state
+var providerItems = [];
+var providerCursor = 0;
+// Confirm state
+var confirmAction = null;
+var confirmLabel = "";
 
 function flash(msg) {
   message = msg;
@@ -656,6 +703,7 @@ function getPluginActions(pitem) {
   a.push({ key: "update", label: "Force rebuild & deploy" });
   a.push({ key: "commits", label: "Select specific commit (Downgrade)" });
   a.push({ key: "disable-plugin", label: "Disable plugin" });
+  a.push({ key: "uninstall-plugin", label: "Uninstall plugin" });
   a.push({ key: "cancel", label: "Cancel" });
   return a;
 }
@@ -910,7 +958,7 @@ function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
   var statusStr = statusParts.join(GRAY + " | " + RST);
   var versionStr = pitem.latestTag
     ? (GRAY + pitem.latestTag + RST)
-    : (pitem.localHead ? (GRAY + pitem.localHead.substring(0, 7) + RST) : (GRAY + "---" + RST));
+    : (pitem.localHead ? (DIM + pitem.localHead.substring(0, 7) + RST) : (GRAY + "---" + RST));
 
   pushBody("  " + bg + arrow + nameStyle + pad(trunc(pitem.name, nameW), nameW) + RST + bg + " " + statusStr + "  " + versionStr + RST, isSelected);
 
@@ -978,10 +1026,11 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
     if (p.updateAvail) updateCount++;
   }
 
-  // Sub-tabs: Installed | Marketplace
+  // Sub-tabs: Installed | Marketplace | Provider
   var instTab = pluginSubPage === "installed" ? (BOLD + WHITE + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
   var mktTab = pluginSubPage === "marketplace" ? (BOLD + WHITE + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
-  pushBody("  " + instTab + "  " + mktTab + "    " + DIM + "Tab" + RST + " switch", false);
+  var provTab = pluginSubPage === "provider" ? (BOLD + WHITE + BG_SEL + " Provider " + RST) : (GRAY + " Provider " + RST);
+  pushBody("  " + instTab + "  " + mktTab + "  " + provTab + "    " + DIM + "Tab" + RST + " switch", false);
   pushBody("", false);
 
   if (pluginSubPage === "marketplace") {
@@ -1009,6 +1058,35 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
     pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
       DIM + "Enter" + RST + " Install  " +
+      DIM + "Tab" + RST + " Switch  " +
+      DIM + "Q" + RST + " Quit" + RST);
+    return;
+  }
+
+  if (pluginSubPage === "provider") {
+    providerItems = buildProviderList();
+    if (providerItems.length === 0) {
+      pushBody("  " + GRAY + "No AI providers found." + RST, false);
+      pushBody("  " + GRAY + "Install a plugin with auth capabilities." + RST, false);
+    } else {
+      pushBody("  " + MAGENTA + "#" + GRAY + " AI Provider" + RST, false);
+      for (var pi2 = 0; pi2 < providerItems.length; pi2++) {
+        var pv = providerItems[pi2];
+        var pvSel = pi2 === providerCursor;
+        var pvArrow = pvSel ? (YELLOW + " > " + RST) : "   ";
+        var pvBg = pvSel ? BG_SEL : "";
+        var pvNameStyle = pvSel ? (BOLD + WHITE) : DIM;
+        var pvActive = pv.active ? (GREEN + " ● active" + RST) : (GRAY + " ○" + RST);
+        pushBody("  " + pvBg + pvArrow + pvNameStyle + pad(trunc(pv.name, nameW), nameW) + RST + pvBg + pvActive + "  " + GRAY + pv.desc + RST, pvSel);
+      }
+    }
+    pushBody("", false);
+    if (message) {
+      pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+    }
+    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
+      DIM + "Enter" + RST + " Select  " +
       DIM + "Tab" + RST + " Switch  " +
       DIM + "Q" + RST + " Quit" + RST);
     return;
@@ -1173,7 +1251,9 @@ function handleKey(key) {
     return;
   }
 
-  if (page === "projects") {
+  if (mode === "confirm") {
+    handleConfirmKey(key);
+  } else if (page === "projects") {
     handleProjectKey(key);
   } else if (page === "mcp") {
     handleMcpKey(key);
@@ -1276,9 +1356,23 @@ function handlePluginKey(key) {
     }
     else if (key === "tab") {
       if (pluginSubPage === "installed") { pluginSubPage = "marketplace"; marketplaceItems = buildMarketplaceList(); mkCursor = 0; }
+      else if (pluginSubPage === "marketplace") { pluginSubPage = "provider"; providerItems = buildProviderList(); providerCursor = 0; }
       else { pluginSubPage = "installed"; }
     }
-    else if (pluginSubPage === "marketplace" && (key === "enter" || key === "space")) {
+    else if (pluginSubPage === "provider" && (key === "enter" || key === "space")) {
+      if (providerItems.length > 0) {
+        var prov = providerItems[providerCursor];
+        setActiveProvider(prov.id);
+        flash("Provider set to: " + prov.name);
+      }
+    }
+    else if (pluginSubPage === "provider" && (key === "up" || key === "w")) {
+      providerCursor = Math.max(0, providerCursor - 1);
+    }
+    else if (pluginSubPage === "provider" && (key === "down" || key === "s")) {
+      providerCursor = Math.min(providerItems.length - 1, providerCursor + 1);
+    }
+        else if (pluginSubPage === "marketplace" && (key === "enter" || key === "space")) {
       if (marketplaceItems.length > 0) {
         flash("Installing " + marketplaceItems[mkCursor].name + "...");
         render();
@@ -1326,7 +1420,13 @@ function handlePluginKey(key) {
         flash(pitem.name + " disabled. Restart OpenCode to unload.");
         mode = "list";
       }
-      else if (action === "enable-plugin") {
+      else if (action === "uninstall-plugin") {
+        confirmAction = { type: "uninstall-plugin", target: pitem };
+        confirmLabel = "Uninstall " + pitem.name + "? This will delete the repo. (Y to confirm)";
+        flash(confirmLabel);
+        mode = "confirm";
+      }
+            else if (action === "enable-plugin") {
         var plugins = loadPlugins();
         var match = plugins.find(function(r) { return r.name === pitem.name; });
         if (match) { delete match.enabled; savePlugins(plugins); }
@@ -1470,8 +1570,9 @@ function parseKey(buf) {
   if (buf[0] === 13 || buf[0] === 10) return "enter";
   if (buf[0] === 32) return "space";
   if (buf[0] === 3) { cleanup(); process.exit(1); }
+  if (buf[0] === 9) return "tab";
   var ch = String.fromCharCode(buf[0]).toLowerCase();
-  if ("wsadqpchouf".indexOf(ch) !== -1) return ch;
+  if ("wsadqpchofuximy".indexOf(ch) !== -1) return ch;
   return null;
 }
 
@@ -1499,11 +1600,11 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
   var nameW = Math.min(28, Math.max(18, cols - 50));
 
   if (mcpMode === "actions") {
-    var mitem = mcpItems[mcpCursor];
+    var mitem = mcpSubPage === "installed" ? getInstalledMcpList()[mcpCursor] : mcpItems[mcpCursor];
+    if (!mitem) { mcpMode = "catalog"; return; }
     var acts = getMcpActions(mitem);
     pushBody("  " + MAGENTA + "#" + GRAY + " " + mitem.name + RST, false);
-    pushBody("  " + GRAY + mitem.desc + RST, false);
-    pushBody("  " + GRAY + mitem.command + " " + (mitem.args || []).join(" ") + RST, false);
+    pushBody("  " + GRAY + (mitem.desc || mitem.command + " " + (mitem.args || []).join(" ")) + RST, false);
     var envKeys = Object.keys(mitem.env || {});
     if (envKeys.length > 0) {
       pushBody("  " + GRAY + "Env: " + envKeys.join(", ") + RST, false);
@@ -1526,89 +1627,150 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
     return;
   }
 
-  // Category filter tabs
-  var catLine = "  ";
-  for (var ci = 0; ci < MCP_CATEGORIES.length; ci++) {
-    var cat = MCP_CATEGORIES[ci];
-    if (ci === mcpCategoryIdx) {
-      catLine += BOLD + CYAN + BG_SEL + " " + cat + " " + RST + " ";
-    } else {
-      catLine += GRAY + " " + cat + " " + RST + " ";
-    }
-  }
-  pushBody(catLine, false);
+  // Sub-tabs: Installed | Marketplace
+  var mcpInstTab = mcpSubPage === "installed" ? (BOLD + WHITE + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
+  var mcpMktTab = mcpSubPage === "marketplace" ? (BOLD + WHITE + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
+  pushBody("  " + mcpInstTab + "  " + mcpMktTab + "    " + DIM + "Tab" + RST + " switch", false);
   pushBody("", false);
 
-  var installedCount = 0;
-  for (var e of mcpItems) { if (e.installed) installedCount++; }
-  pushBody("  " + MAGENTA + "#" + GRAY + " MCP Servers " +
-    GRAY + "(" + installedCount + " installed, " + mcpItems.length + " available)" + RST, false);
-
-  if (mcpItems.length === 0) {
-    pushBody("  " + GRAY + "No servers in this category." + RST, false);
+  if (mcpSubPage === "installed") {
+    var installedList = getInstalledMcpList();
+    if (installedList.length === 0) {
+      pushBody("  " + GRAY + "No MCP servers installed." + RST, false);
+      pushBody("  " + GRAY + "Switch to Marketplace to browse and install servers." + RST, false);
+    } else {
+      pushBody("  " + MAGENTA + "#" + GRAY + " Installed MCP Servers (" + installedList.length + ")" + RST, false);
+      for (var i = 0; i < installedList.length; i++) {
+        var m = installedList[i];
+        var sel = i === mcpCursor;
+        var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+        var bg = sel ? BG_SEL : "";
+        var nameStyle = sel ? (BOLD + WHITE) : DIM;
+        pushBody("  " + bg + arrow + GREEN + "\u25cf" + RST + " " + nameStyle + pad(trunc(m.name, nameW), nameW) + RST + bg + "  " + GRAY + m.command + " " + (m.args || []).join(" ") + RST, sel);
+        if (sel) {
+          var ek = Object.keys(m.env || {});
+          if (ek.length > 0) pushBody("  " + GRAY + "     env: " + ek.join(", ") + RST, sel);
+        }
+      }
+    }
+    pushBody("", false);
+    if (message) {
+      pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+    }
+    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
+      DIM + "Enter" + RST + " Actions  " +
+      DIM + "X" + RST + " Uninstall  " +
+      DIM + "Tab" + RST + " Switch  " +
+      DIM + "Q" + RST + " Quit" + RST);
   } else {
+    // Marketplace
+    mcpItems = buildMcpList("All");
+    pushBody("  " + MAGENTA + "#" + GRAY + " MCP Marketplace (" + mcpItems.length + " available)" + RST, false);
     for (var i = 0; i < mcpItems.length; i++) {
       var m = mcpItems[i];
       var sel = i === mcpCursor;
       var arrow = sel ? (YELLOW + " > " + RST) : "   ";
       var bg = sel ? BG_SEL : "";
       var nameStyle = sel ? (BOLD + WHITE) : DIM;
-      var statusIcon = m.installed ? (GREEN + "●" + RST) : (GRAY + "○" + RST);
-      var catTag = GRAY + "[" + m.category + "]" + RST;
-      pushBody("  " + bg + arrow + statusIcon + " " + nameStyle + pad(trunc(m.name, nameW), nameW) + RST + bg + "  " + GRAY + trunc(m.desc, Math.max(10, cols - nameW - 20)) + RST + "  " + catTag, sel);
+      var statusIcon = m.installed ? (GREEN + "\u25cf" + RST) : (GRAY + "\u25cb" + RST);
+      pushBody("  " + bg + arrow + statusIcon + " " + nameStyle + pad(trunc(m.name, nameW), nameW) + RST + bg + "  " + GRAY + trunc(m.desc, Math.max(10, cols - nameW - 20)) + RST, sel);
       if (sel) {
         pushBody("  " + GRAY + "     " + m.command + " " + (m.args || []).join(" ") + RST, sel);
+        var ek = Object.keys(m.env || {});
+        if (ek.length > 0) pushBody("  " + GRAY + "     env: " + ek.join(", ") + RST, sel);
       }
     }
+    pushBody("", false);
+    if (message) {
+      pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+    }
+    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
+      DIM + "Enter" + RST + " Select  " +
+      DIM + "I" + RST + " Install  " +
+      DIM + "Tab" + RST + " Switch  " +
+      DIM + "Q" + RST + " Quit" + RST);
   }
-
-  pushBody("", false);
-  if (message) {
-    pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
-  }
-  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-  pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-    DIM + "Enter" + RST + " Select  " +
-    DIM + "I" + RST + " Install  " +
-    DIM + "X" + RST + " Uninstall  " +
-    DIM + "<>" + RST + " Category  " +
-    DIM + "Q" + RST + " Quit" + RST);
 }
 
 // ---------------------------------------------------------------------------
 // MCP key handling
 // ---------------------------------------------------------------------------
 
+function handleConfirmKey(key) {
+  if (key === "y") {
+    if (confirmAction && confirmAction.type === "uninstall-plugin") {
+      var pitem = confirmAction.target;
+      // Remove from plugins.json
+      var plugins = loadPlugins();
+      plugins = plugins.filter(function(r) { return r.name !== pitem.name; });
+      savePlugins(plugins);
+      // Delete deployed file
+      var deployedPath = join(PLUGINS_DIR, (pitem.pluginFile || "plugin.js"));
+      if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
+      // Delete repo folder
+      var repoDir = join(REPOS_DIR, pitem.folderName);
+      if (existsSync(repoDir)) {
+        try { execSync((process.platform === "win32" ? "rmdir /s /q " : "rm -rf ") + '"' + repoDir + '"', { timeout: 30000, stdio: "ignore" }); } catch {}
+      }
+      pluginItems = buildCombinedPluginList();
+      if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+      flash(pitem.name + " uninstalled.");
+    } else if (confirmAction && confirmAction.type === "uninstall-mcp") {
+      uninstallMcpServer(confirmAction.target);
+      mcpItems = buildMcpList("All");
+      if (mcpCursor >= mcpItems.length) mcpCursor = Math.max(0, mcpItems.length - 1);
+      flash(confirmAction.target + " removed.");
+    }
+    confirmAction = null;
+    confirmLabel = "";
+    mode = "list";
+  } else if (key === "escape" || key === "q") {
+    confirmAction = null;
+    confirmLabel = "";
+    mode = "list";
+    flash("Cancelled.");
+  }
+}
+
 function handleMcpKey(key) {
   if (mcpMode === "catalog") {
-    if (key === "up" || key === "w") { mcpCursor = Math.max(0, mcpCursor - 1); }
-    else if (key === "down" || key === "s") { mcpCursor = Math.min(mcpItems.length - 1, mcpCursor + 1); }
-    else if (key === "enter" || key === "space") {
-      if (mcpItems.length > 0) { mcpMode = "actions"; mcpAcursor = 0; }
+    if (key === "tab") {
+      if (mcpSubPage === "installed") { mcpSubPage = "marketplace"; mcpItems = buildMcpList("All"); mcpCursor = 0; }
+      else { mcpSubPage = "installed"; mcpCursor = 0; }
+      mcpScrollOff = 0;
     }
-    else if (key === "i") {
+    else if (key === "up" || key === "w") { mcpCursor = Math.max(0, mcpCursor - 1); }
+    else if (key === "down" || key === "s") {
+      var maxLen = mcpSubPage === "installed" ? getInstalledMcpList().length : mcpItems.length;
+      mcpCursor = Math.min(maxLen - 1, mcpCursor + 1);
+    }
+    else if (key === "enter" || key === "space") {
+      var maxLen = mcpSubPage === "installed" ? getInstalledMcpList().length : mcpItems.length;
+      if (maxLen > 0) { mcpMode = "actions"; mcpAcursor = 0; }
+    }
+    else if (key === "i" && mcpSubPage === "marketplace") {
       if (mcpItems.length > 0 && !mcpItems[mcpCursor].installed) {
         installMcpServer(mcpItems[mcpCursor]);
-        mcpItems = buildMcpList(MCP_CATEGORIES[mcpCategoryIdx]);
-        flash(mcpItems[mcpCursor].name + " installed. Restart " + APP_NAME + " to activate.");
+        mcpItems = buildMcpList("All");
+        flash(mcpItems[mcpCursor] ? mcpItems[mcpCursor].name + " installed. Restart " + APP_NAME + " to activate." : "Installed.");
       }
     }
-    else if (key === "x") {
-      if (mcpItems.length > 0 && mcpItems[mcpCursor].installed) {
-        uninstallMcpServer(mcpItems[mcpCursor].name);
-        mcpItems = buildMcpList(MCP_CATEGORIES[mcpCategoryIdx]);
-        flash(mcpItems[mcpCursor].name + " uninstalled.");
+    else if (key === "x" && mcpSubPage === "installed") {
+      var instList = getInstalledMcpList();
+      if (instList.length > 0 && mcpCursor < instList.length) {
+        confirmAction = { type: "uninstall-mcp", target: instList[mcpCursor].name };
+        confirmLabel = "Remove " + instList[mcpCursor].name + "? (Y to confirm)";
+        flash(confirmLabel);
+        mode = "confirm";
       }
-    }
-    else if (key === "tab") {
-      mcpCategoryIdx = (mcpCategoryIdx + 1) % MCP_CATEGORIES.length;
-      mcpItems = buildMcpList(MCP_CATEGORIES[mcpCategoryIdx]);
-      mcpCursor = 0;
-      mcpScrollOff = 0;
     }
     else if (key === "q" || key === "escape") { cleanup(); process.exit(1); }
   } else if (mcpMode === "actions") {
-    var mitem = mcpItems[mcpCursor];
+    var activeList = mcpSubPage === "installed" ? getInstalledMcpList() : mcpItems;
+    var mitem = activeList[mcpCursor];
+    if (!mitem) { mcpMode = "catalog"; return; }
     var acts = getMcpActions(mitem);
     if (key === "up" || key === "w") { mcpAcursor = Math.max(0, mcpAcursor - 1); }
     else if (key === "down" || key === "s") { mcpAcursor = Math.min(acts.length - 1, mcpAcursor + 1); }
@@ -1616,13 +1778,14 @@ function handleMcpKey(key) {
       var action = acts[mcpAcursor].key;
       if (action === "install") {
         installMcpServer(mitem);
-        mcpItems = buildMcpList(MCP_CATEGORIES[mcpCategoryIdx]);
+        mcpItems = buildMcpList("All");
         flash(mitem.name + " installed. Restart " + APP_NAME + " to activate.");
         mcpMode = "catalog";
       } else if (action === "uninstall") {
-        uninstallMcpServer(mitem.name);
-        mcpItems = buildMcpList(MCP_CATEGORIES[mcpCategoryIdx]);
-        flash(mitem.name + " uninstalled.");
+        confirmAction = { type: "uninstall-mcp", target: mitem.name };
+        confirmLabel = "Remove " + mitem.name + "? (Y to confirm)";
+        flash(confirmLabel);
+        mode = "confirm";
         mcpMode = "catalog";
       } else if (action === "configure") {
         flash("Set env vars in " + MCP_CONFIG_PATH);
