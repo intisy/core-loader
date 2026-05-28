@@ -495,6 +495,7 @@ function getInstalledMcpList() {
 }
 
 function buildMcpList(categoryFilter) {
+  fetchCatalogsAsync();
   var installed = loadMcpConfig().mcpServers || {};
   var list = [];
   for (var entry of MCP_CATALOG) {
@@ -527,6 +528,81 @@ function uninstallMcpServer(name) {
 // Plugin Marketplace Catalog
 // ---------------------------------------------------------------------------
 
+var { exec } = require("child_process");
+var catalogFetched = false;
+function fetchCatalogsAsync() {
+  if (catalogFetched) return;
+  catalogFetched = true;
+  
+  var curlCmd = process.platform === "win32" ? "curl.exe" : "curl";
+  
+  // Fetch plugins
+  exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=topic:claude-code-plugin&sort=stars&order=desc"', function(err, stdout) {
+    if (!err && stdout) {
+      try {
+        var json = JSON.parse(stdout);
+        if (json.items) {
+          for (var i = 0; i < json.items.length; i++) {
+            var it = json.items[i];
+            var cleanName = it.name.replace(/^claude-|^opencode-/, "");
+            var exists = MARKETPLACE_CATALOG.find(function(m) { return m.name === cleanName; });
+            if (!exists) {
+              MARKETPLACE_CATALOG.push({
+                name: cleanName,
+                desc: it.description || "",
+                author: it.owner.login,
+                url: "https://github.com/" + it.owner.login,
+                category: "Community",
+                stars: it.stargazers_count
+              });
+            } else {
+              exists.stars = it.stargazers_count;
+            }
+          }
+          MARKETPLACE_CATALOG.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
+          if (pluginSubPage === "marketplace") {
+             marketplaceItems = buildMarketplaceList();
+             render();
+          }
+        }
+      } catch(e) {}
+    }
+  });
+
+  // Fetch MCPs
+  exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=topic:mcp-server&sort=stars&order=desc"', function(err, stdout) {
+    if (!err && stdout) {
+      try {
+        var json = JSON.parse(stdout);
+        if (json.items) {
+          for (var i = 0; i < json.items.length; i++) {
+            var it = json.items[i];
+            var exists = MCP_CATALOG.find(function(m) { return m.name === it.name; });
+            if (!exists) {
+              MCP_CATALOG.push({
+                name: it.name,
+                desc: it.description || "",
+                command: "npx",
+                args: ["-y", it.full_name],
+                env: {},
+                category: "Community",
+                stars: it.stargazers_count
+              });
+            } else {
+              exists.stars = it.stargazers_count;
+            }
+          }
+          MCP_CATALOG.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
+          if (page === "mcp" && mcpSubPage === "marketplace") {
+             mcpItems = buildMcpList("All");
+             render();
+          }
+        }
+      } catch(e) {}
+    }
+  });
+}
+
 var MARKETPLACE_CATALOG = [
   { name: "antigravity-auth", desc: "Multi-account auth & proxy failover", author: "intisy", url: "https://github.com/intisy", category: "Auth" },
   { name: "credit-dashboard", desc: "Usage & credit tracking dashboard", author: "intisy", url: "https://github.com/intisy", category: "Analytics" },
@@ -535,6 +611,7 @@ var MARKETPLACE_CATALOG = [
 ];
 
 function buildMarketplaceList() {
+  fetchCatalogsAsync();
   var installed = loadPlugins();
   var installedNames = installed.map(function(p) { return p.name; });
   return MARKETPLACE_CATALOG.filter(function(m) {
@@ -1294,96 +1371,99 @@ function handleProjectKey(key) {
 
 function handlePluginKey(key) {
   if (mode === "list") {
-    if (pluginSubPage === "marketplace") {
-      if (key === "up" || key === "w") { mkCursor = Math.max(0, mkCursor - 1); }
-      else if (key === "down" || key === "s") { mkCursor = Math.min(marketplaceItems.length - 1, mkCursor + 1); }
-    }
-    else if (key === "up" || key === "w") { pcursor = Math.max(0, pcursor - 1); }
-    else if (key === "down" || key === "s") { pcursor = Math.min(pluginItems.length - 1, pcursor + 1); }
-    else if (key === "enter" || key === "space") {
-      if (pluginItems.length > 0 && pluginItems[pcursor].type !== "npm") { mode = "pactions"; pacursor = 0; }
-      else if (pluginItems.length > 0 && pluginItems[pcursor].type === "npm") { flash(pluginItems[pcursor].name + " is managed via npm"); }
-    }
-    else if (key === "f") {
-      flash("Fetching remotes...");
-      render();
-      fetchPluginRemotes(pluginItems);
-      pluginFetched = true;
-      var updateCount = 0;
-      for (var p of pluginItems) { if (p.updateAvail) updateCount++; }
-      flash(updateCount > 0 ? updateCount + " update(s) available" : "All plugins up to date");
-    }
-    else if (key === "a") {
-      var toUpdate = pluginItems.filter(function(p) { return p.type !== "npm" && (p.updateAvail || !p.deployed); });
-      if (toUpdate.length === 0) {
-        flash("All plugins are already up to date.");
-      } else {
-        var errors = [];
-        for (var pi of toUpdate) {
-          flash("Updating " + pi.name + "...");
-          render();
-          var e = runPluginUpdate(pi);
-          if (e) errors.push(pi.name + ": " + e);
-        }
-        pluginItems = buildCombinedPluginList();
-        if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
-        flash(errors.length > 0 ? errors.join("; ") : toUpdate.length + " plugin(s) updated. Restart OpenCode to apply.");
-      }
-    }
-    else if (key === "u") {
-      if (pluginItems.length > 0 && pluginItems[pcursor].type !== "npm") {
-        var p = pluginItems[pcursor];
-        flash("Updating " + p.name + "...");
-        render();
-        var err = runPluginUpdate(p);
-        pluginItems = buildCombinedPluginList();
-        if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
-        flash(err ? p.name + ": " + err : p.name + " updated. Restart OpenCode to apply.");
-      }
-    }
-    else if (key === "d") {
-      if (pluginItems.length > 0 && pluginItems[pcursor].type !== "npm") {
-        var p = pluginItems[pcursor];
-        var plugins = loadPlugins();
-        var match = plugins.find(function(r) { return r.name === p.name; });
-        if (match) { match.enabled = false; savePlugins(plugins); }
-        var deployedPath = join(PLUGINS_DIR, (p.pluginFile || "plugin.js"));
-        if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
-        pluginItems = buildCombinedPluginList();
-        if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
-        flash(p.name + " disabled. Restart OpenCode to unload.");
-      }
-    }
-    else if (key === "tab") {
+    if (key === "q" || key === "escape") { cleanup(); process.exit(1); return; }
+    
+    if (key === "tab") {
       if (pluginSubPage === "installed") { pluginSubPage = "marketplace"; marketplaceItems = buildMarketplaceList(); mkCursor = 0; }
       else if (pluginSubPage === "marketplace") { pluginSubPage = "provider"; providerItems = buildProviderList(); providerCursor = 0; }
       else { pluginSubPage = "installed"; }
+      return;
     }
-    else if (pluginSubPage === "provider" && (key === "enter" || key === "space")) {
-      if (providerItems.length > 0) {
-        var prov = providerItems[providerCursor];
-        setActiveProvider(prov.id);
-        flash("Provider set to: " + prov.name);
+
+    if (pluginSubPage === "marketplace") {
+      if (key === "up" || key === "w") { mkCursor = Math.max(0, mkCursor - 1); }
+      else if (key === "down" || key === "s") { mkCursor = Math.min(marketplaceItems.length - 1, mkCursor + 1); }
+      else if (key === "enter" || key === "space") {
+        if (marketplaceItems.length > 0) {
+          flash("Installing " + marketplaceItems[mkCursor].name + "...");
+          render();
+          var merr = installMarketplacePlugin(marketplaceItems[mkCursor]);
+          if (merr) flash(merr);
+          else { flash("Installed! Restart to activate."); pluginItems = buildCombinedPluginList(); }
+          marketplaceItems = buildMarketplaceList();
+          if (mkCursor >= marketplaceItems.length) mkCursor = Math.max(0, marketplaceItems.length - 1);
+        }
       }
     }
-    else if (pluginSubPage === "provider" && (key === "up" || key === "w")) {
-      providerCursor = Math.max(0, providerCursor - 1);
+    else if (pluginSubPage === "provider") {
+      if (key === "up" || key === "w") { providerCursor = Math.max(0, providerCursor - 1); }
+      else if (key === "down" || key === "s") { providerCursor = Math.min(providerItems.length - 1, providerCursor + 1); }
+      else if (key === "enter" || key === "space") {
+        if (providerItems.length > 0) {
+          var prov = providerItems[providerCursor];
+          setActiveProvider(prov.id);
+          flash("Provider set to: " + prov.name);
+        }
+      }
     }
-    else if (pluginSubPage === "provider" && (key === "down" || key === "s")) {
-      providerCursor = Math.min(providerItems.length - 1, providerCursor + 1);
-    }
-        else if (pluginSubPage === "marketplace" && (key === "enter" || key === "space")) {
-      if (marketplaceItems.length > 0) {
-        flash("Installing " + marketplaceItems[mkCursor].name + "...");
+    else { // installed
+      if (key === "up" || key === "w") { pcursor = Math.max(0, pcursor - 1); }
+      else if (key === "down" || key === "s") { pcursor = Math.min(pluginItems.length - 1, pcursor + 1); }
+      else if (key === "enter" || key === "space") {
+        if (pluginItems.length > 0 && pluginItems[pcursor].type !== "npm") { mode = "pactions"; pacursor = 0; }
+        else if (pluginItems.length > 0 && pluginItems[pcursor].type === "npm") { flash(pluginItems[pcursor].name + " is managed via npm"); }
+      }
+      else if (key === "f") {
+        flash("Fetching remotes...");
         render();
-        var merr = installMarketplacePlugin(marketplaceItems[mkCursor]);
-        if (merr) flash(merr);
-        else { flash("Installed! Restart to activate."); pluginItems = buildCombinedPluginList(); }
-        marketplaceItems = buildMarketplaceList();
-        if (mkCursor >= marketplaceItems.length) mkCursor = Math.max(0, marketplaceItems.length - 1);
+        fetchPluginRemotes(pluginItems);
+        pluginFetched = true;
+        var updateCount = 0;
+        for (var p of pluginItems) { if (p.updateAvail) updateCount++; }
+        flash(updateCount > 0 ? updateCount + " update(s) available" : "All plugins up to date");
+      }
+      else if (key === "a") {
+        var toUpdate = pluginItems.filter(function(p) { return p.type !== "npm" && (p.updateAvail || !p.deployed); });
+        if (toUpdate.length === 0) {
+          flash("All plugins are already up to date.");
+        } else {
+          var errors = [];
+          for (var pi of toUpdate) {
+            flash("Updating " + pi.name + "...");
+            render();
+            var e = runPluginUpdate(pi);
+            if (e) errors.push(pi.name + ": " + e);
+          }
+          pluginItems = buildCombinedPluginList();
+          if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+          flash(errors.length > 0 ? errors.join("; ") : toUpdate.length + " plugin(s) updated. Restart OpenCode to apply.");
+        }
+      }
+      else if (key === "u") {
+        if (pluginItems.length > 0 && pluginItems[pcursor].type !== "npm") {
+          var p = pluginItems[pcursor];
+          flash("Updating " + p.name + "...");
+          render();
+          var err = runPluginUpdate(p);
+          pluginItems = buildCombinedPluginList();
+          if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+          flash(err ? p.name + ": " + err : p.name + " updated. Restart OpenCode to apply.");
+        }
+      }
+      else if (key === "d") {
+        if (pluginItems.length > 0 && pluginItems[pcursor].type !== "npm") {
+          var p = pluginItems[pcursor];
+          var plugins = loadPlugins();
+          var match = plugins.find(function(r) { return r.name === p.name; });
+          if (match) { match.enabled = false; savePlugins(plugins); }
+          var deployedPath = join(PLUGINS_DIR, (p.pluginFile || "plugin.js"));
+          if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
+          pluginItems = buildCombinedPluginList();
+          if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+          flash(p.name + " disabled. Restart OpenCode to unload.");
+        }
       }
     }
-    else if (key === "q" || key === "escape") { cleanup(); process.exit(1); }
   } else if (mode === "pactions") {
     var pitem = pluginItems[pcursor];
     var acts = getPluginActions(pitem);
