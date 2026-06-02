@@ -20,7 +20,7 @@ var CACHE_DIR = join(CONFIG_DIR, "cache");
 var CONFIG_PATH = join(CONFIG_FOLDER, "oc-config.json");
 var UPDATE_CHECK_PATH = join(CACHE_DIR, "oc-last-update-check");
 var PLUGINS_JSON = join(CONFIG_FOLDER, "plugins.json");
-var REPOS_DIR = join(CONFIG_DIR, "repos");
+var REPOS_DIR = join(HOME, ".config", "github", "repos");
 var PLUGINS_DIR = join(CONFIG_DIR, "plugin");
 
 // ---------------------------------------------------------------------------
