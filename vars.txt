@@ -1,5 +1,0 @@
-﻿var HOME = homedir();
-var APP_NAME = process.env.HUB_APP_NAME || 'OpenCode';
-var CLI_CMD = process.env.HUB_CLI_CMD || 'opencode';
-var NPM_PKG = process.env.HUB_NPM_PKG || 'opencode-ai';
-var CACHE_PKG_DIR = process.env.HUB_CACHE_PKG_DIR || join(homedir(), '.cache', 'opencode', 'node_modules');
