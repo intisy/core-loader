@@ -91,7 +91,8 @@ global.OpenCodeAPI = {
 function getUpdater() {
   const fs = require('fs');
   const path = require('path');
-  const updaterPath = path.join(PLUGINS_DIR, "opencode-plugin-updater.js");
+  const homedir = require('os').homedir();
+  const updaterPath = path.join(homedir, ".config", "github", "plugin-updater", "index.js");
   if (fs.existsSync(updaterPath)) {
     try {
       // Clear cache to allow reloading
