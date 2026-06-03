@@ -91,8 +91,7 @@ global.OpenCodeAPI = {
 function getUpdater() {
   const fs = require('fs');
   const path = require('path');
-  const homedir = require('os').homedir();
-  const updaterPath = path.join(homedir, ".config", "github", "plugin-updater", "index.js");
+  const updaterPath = path.join(PLUGINS_DIR, "plugin-updater", "index.js");
   if (fs.existsSync(updaterPath)) {
     try {
       // Clear cache to allow reloading
@@ -2407,25 +2406,29 @@ process.stdin.on("data", function(buf) {
         const { execSync } = require('child_process');
         const fs = require('fs');
         const path = require('path');
-        const reposDir = join(CONFIG_DIR, "repos", "intisy");
+        const isCC = process.env.CC_LAUNCHER === "1";
+        const reposDir = path.join(require('os').homedir(), ".config", isCC ? "claude" : "opencode", "repos");
         if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
         
-        const updaterDir = join(reposDir, "opencode-plugin-updater");
+        const updaterDir = path.join(reposDir, "plugin-updater");
         // For development/local testing, if the directory already exists, we just use it
         if (!fs.existsSync(updaterDir)) {
-           execSync("git clone https://github.com/intisy/opencode-plugin-updater.git", { cwd: reposDir, stdio: "inherit" });
+           execSync("git clone https://github.com/intisy/plugin-updater.git", { cwd: reposDir, stdio: "inherit" });
         }
         
         var pl = loadPlugins();
-        if (!pl.some(function(p) { return p.name === "opencode-plugin-updater"; })) {
-          pl.push({ name: "opencode-plugin-updater", url: "https://github.com/intisy/opencode-plugin-updater", autoUpdate: true, enabled: true });
+        if (!pl.some(function(p) { return p.name === "plugin-updater"; })) {
+          pl.push({ name: "plugin-updater", url: "https://github.com/intisy/plugin-updater", autoUpdate: true, enabled: true });
           savePlugins(pl);
         }
         
         // Copy the built file (if any) or index.js to plugins dir
         if (!fs.existsSync(PLUGINS_DIR)) fs.mkdirSync(PLUGINS_DIR, { recursive: true });
-        if (fs.existsSync(join(updaterDir, "index.js"))) {
-          fs.copyFileSync(join(updaterDir, "index.js"), join(PLUGINS_DIR, "opencode-plugin-updater.js"));
+        const pluginExecutionPath = path.join(PLUGINS_DIR, "plugin-updater");
+        if (!fs.existsSync(pluginExecutionPath)) fs.mkdirSync(pluginExecutionPath, { recursive: true });
+
+        if (fs.existsSync(path.join(updaterDir, "index.js"))) {
+          fs.copyFileSync(path.join(updaterDir, "index.js"), path.join(pluginExecutionPath, "index.js"));
         }
       } catch(e) {
         console.error("Failed to install updater:", e.message);
