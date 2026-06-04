@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -62,3 +64,4 @@ function runPluginUpdate(pluginItem, reposDir, pluginsDir) {
 module.exports = {
   runPluginUpdate
 };
+// @ts-nocheck

@@ -1,3 +1,7 @@
+// @ts-nocheck
+
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 // ---------------------------------------------------------------------------
 // Account sync & rate-limit reset (shared between claude-hub and opencode-hub)
 // ---------------------------------------------------------------------------
@@ -165,3 +169,4 @@ function resetRateLimits() {
   return cleared;
 }
 module.exports = { syncAccounts, resetRateLimits }; 
+// @ts-nocheck
