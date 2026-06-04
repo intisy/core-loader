@@ -1,5 +1,5 @@
 {
-  "name": "core-hub",
+  "name": "core-loader",
   "version": "1.0.0",
   "description": "",
   "main": "dist/index.js",
