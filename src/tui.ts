@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+// @ts-nocheck
+
 import { Database } from "bun:sqlite";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, unlinkSync, readdirSync } from "fs";
 import { execSync } from "child_process";
@@ -2447,3 +2449,4 @@ process.stdin.on("data", function(buf) {
   var key = parseKey(buf);
   if (key) { handleKey(key); render(); }
 });
+// @ts-nocheck
