@@ -25,9 +25,6 @@ var PLUGINS_JSON = join(CONFIG_FOLDER, "plugins.json");
 var REPOS_DIR = join(CONFIG_DIR, "repos");
 var PLUGINS_DIR = join(CONFIG_DIR, "plugin");
 
-// ---------------------------------------------------------------------------
-// OpenCode Launcher API
-// ---------------------------------------------------------------------------
 global.OpenCodeAPI = {
   getReposDir: function() { return REPOS_DIR; },
   getPluginsDir: function() { return PLUGINS_DIR; },
@@ -87,9 +84,6 @@ global.OpenCodeAPI = {
   }
 };
 
-// ---------------------------------------------------------------------------
-// Updater Delegation
-// ---------------------------------------------------------------------------
 function getUpdater() {
   const fs = require('fs');
   const path = require('path');
@@ -106,9 +100,7 @@ function getUpdater() {
   return null;
 }
 
-// ---------------------------------------------------------------------------
 // Folder name helper: <creator>/<repo-name> to avoid collisions
-// ---------------------------------------------------------------------------
 
 function loadNpmPlugins() {
   var ocPath = join(CONFIG_DIR, "opencode.json");
@@ -150,9 +142,7 @@ function getFolderName(plugin) {
   return plugin.name;
 }
 
-// ---------------------------------------------------------------------------
 // Migration: move legacy config files into config/
-// ---------------------------------------------------------------------------
 
 function migrateConfigs() {
   if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
@@ -168,9 +158,7 @@ function migrateConfigs() {
 
 migrateConfigs();
 
-// ---------------------------------------------------------------------------
 // Auto-update OpenCode itself
-// ---------------------------------------------------------------------------
 
 function checkForUpdates() {
   try {
@@ -202,9 +190,7 @@ function checkForUpdates() {
 
 checkForUpdates();
 
-// ---------------------------------------------------------------------------
 // Project launcher data
-// ---------------------------------------------------------------------------
 
 function loadConfig() {
   try { if (existsSync(CONFIG_PATH)) return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")); } catch {}
@@ -358,9 +344,7 @@ function buildList() {
   return list;
 }
 
-// ---------------------------------------------------------------------------
 // Plugin data
-// ---------------------------------------------------------------------------
 
 var customTabs = [];
 
@@ -499,9 +483,7 @@ function fetchPluginRemotes(pluginItems) {
 
 
 
-// ---------------------------------------------------------------------------
 // ANSI
-// ---------------------------------------------------------------------------
 
 var E = "\x1b[";
 var RST = E + "0m";
@@ -525,9 +507,7 @@ function hideCur() { process.stderr.write(E + "?25l"); }
 function showCur() { process.stderr.write(E + "?25h"); }
 
 
-// ---------------------------------------------------------------------------
 // MCP Server Catalog (curated, verified packages)
-// ---------------------------------------------------------------------------
 
 var MARKETPLACE_CATALOG = [];
 var MCP_CATALOG = [
@@ -571,9 +551,7 @@ var MCP_CATALOG = [
 
 var MCP_CATEGORIES = ["All", "Search", "Development", "Files", "Database", "Cloud", "Communication", "Productivity", "Data", "AI", "Plugin"];
 
-// ---------------------------------------------------------------------------
 // MCP Config read/write (environment-aware)
-// ---------------------------------------------------------------------------
 
 var MCP_CONFIG_PATH = join(CONFIG_DIR, ".mcp.json");
 
@@ -752,9 +730,7 @@ function uninstallMcpServer(name) {
   saveMcpConfig(config);
 }
 
-// ---------------------------------------------------------------------------
 // Plugin Marketplace Catalog
-// ---------------------------------------------------------------------------
 
 var { exec } = require("child_process");
 var catalogFetched = false;
@@ -856,9 +832,7 @@ function installMarketplacePlugin(entry) {
 
 // Provider logic removed - now handled by plugin extensions via registerTab()
 
-// ---------------------------------------------------------------------------
 // State
-// ---------------------------------------------------------------------------
 
 var items = buildList();
 
@@ -935,9 +909,7 @@ function flash(msg) {
   msgTimeout = setTimeout(function() { message = ""; render(); }, 2500);
 }
 
-// ---------------------------------------------------------------------------
 // Project actions
-// ---------------------------------------------------------------------------
 
 function getActions(item) {
   var a = [
@@ -1094,9 +1066,7 @@ function changeProjectPath(oldDir, newDir) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Render: projects page
-// ---------------------------------------------------------------------------
 
 function buildProjectItem(pushBody, i, item, nameW, cols, isSelected) {
   var sel = i === cursor;
@@ -1192,9 +1162,7 @@ function buildProjects(pushBody, pushFoot, cols, barW) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Render: plugins page
-// ---------------------------------------------------------------------------
 
 function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
   var sel = i === pcursor;
@@ -1479,9 +1447,7 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Main render
-// ---------------------------------------------------------------------------
 
 function render() {
   var cols = process.stderr.columns || 80;
@@ -1582,9 +1548,7 @@ function render() {
   _buf = "";
 }
 
-// ---------------------------------------------------------------------------
 // Key handling
-// ---------------------------------------------------------------------------
 function handleKey(key) {
   // Page switching with left/right (only in list mode, not in actions/input)
   if ((mode === "list") && (key === "left" || key === "right")) {
@@ -2020,9 +1984,7 @@ function parseKey(buf) {
 }
 
 
-// ---------------------------------------------------------------------------
 // Render: MCP page
-// ---------------------------------------------------------------------------
 
 function getMcpActions(mitem) {
   var a = [];
@@ -2150,9 +2112,7 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // MCP key handling
-// ---------------------------------------------------------------------------
 
 function handleConfirmKey(key) {
   if (key === "y") {
@@ -2268,9 +2228,7 @@ function handleMcpKey(key) {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Cleanup & startup
-// ---------------------------------------------------------------------------
 
 function cleanup() {
   showCur();
