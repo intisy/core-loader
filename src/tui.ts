@@ -2248,7 +2248,7 @@ try { process.stderr.on("resize", function() { render(); }); } catch(e) {}
 var arg = process.argv[2];
 if (arg) {
   if (arg === "test") {
-    console.log("\x1b[36mRunning Hub Tests...\x1b[0m\n");
+    console.log("\x1b[36mRunning Launcher Tests...\x1b[0m\n");
     var passed = 0, failed = 0;
     
     // Core tests
