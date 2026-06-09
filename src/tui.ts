@@ -1477,7 +1477,7 @@ function render() {
 
   // 1. Build Header
   pushHead("");
-  pushHead("  " + BOLD + CYAN + " " + APP_NAME + RST + GRAY + "  Launcher" + RST);
+  pushHead("  " + BOLD + CYAN + " " + APP_NAME + RST + GRAY + "  Loader" + RST);
   pushHead("  " + GRAY + "-".repeat(barW) + RST);
   var showPluginsTab = pluginItems.length > 0 || MARKETPLACE_CATALOG.length > 0;
   var projTab = page === "projects" ? (BOLD + WHITE + BG_SEL + " Projects " + RST) : (GRAY + " Projects " + RST);
@@ -2276,7 +2276,7 @@ try { process.stderr.on("resize", function() { render(); }); } catch(e) {}
 var arg = process.argv[2];
 if (arg) {
   if (arg === "test") {
-    console.log("\x1b[36mRunning Launcher Tests...\x1b[0m\n");
+    console.log("\x1b[36mRunning Loader Tests...\x1b[0m\n");
     var passed = 0, failed = 0;
     
     // Core tests
