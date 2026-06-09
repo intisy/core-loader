@@ -12,7 +12,7 @@
     "moduleResolution": "nodenext",
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node", "bun"],
+    "types": ["node"],
     "lib": ["esnext"]
   },
   "include": ["src/**/*"]
