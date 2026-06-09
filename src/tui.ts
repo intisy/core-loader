@@ -87,22 +87,34 @@ global.OpenCodeAPI = {
 function getUpdater() {
   const fs = require('fs');
   const path = require('path');
+  // Try file-based path first (git-installed updater)
   const updaterPath = path.join(PLUGINS_DIR, "plugin-updater", "index.js");
   if (fs.existsSync(updaterPath)) {
     try {
-      // Clear cache to allow reloading
       delete require.cache[require.resolve(updaterPath)];
       return require(updaterPath);
     } catch(e) {
-      console.error("Failed to load updater plugin", e);
+      console.error("Failed to load updater plugin from file", e);
     }
   }
+  // Fallback: npm-installed updater (resolved via node module resolution)
+  try {
+    delete require.cache[require.resolve("plugin-updater")];
+    return require("plugin-updater");
+  } catch { /* not installed via npm either */ }
   return null;
 }
 
 // Folder name helper: <creator>/<repo-name> to avoid collisions
 
 function loadNpmPlugins() {
+  // Delegate to updater API when available; fall back to direct read
+  var updater = getUpdater();
+  if (updater && typeof updater.getNpmPlugins === "function") {
+    try {
+      return updater.getNpmPlugins(CONFIG_DIR);
+    } catch(e) { /* fall through to direct read */ }
+  }
   var ocPath = join(CONFIG_DIR, "opencode.json");
   if (!existsSync(ocPath)) return [];
   try {
@@ -116,22 +128,18 @@ function loadNpmPlugins() {
         var name = p.replace(/@[^@\/]+$/, "") || p;
         var version = "";
         try {
-          // OpenCode installs npm plugins into config cache
           var cachePkg = join(CACHE_PKG_DIR, name, "package.json");
-          // Fallback: config-local node_modules, then global npm, then local repos
           var globalNpm = process.platform === "win32"
             ? join(homedir(), "AppData", "Roaming", "npm", "node_modules")
             : join("/usr", "lib", "node_modules");
-          var repoPkg = join(CONFIG_DIR, "repos", "intisy", name, "package.json");
           var pkgPath = existsSync(cachePkg) ? cachePkg
             : existsSync(join(CONFIG_DIR, "node_modules", name, "package.json")) ? join(CONFIG_DIR, "node_modules", name, "package.json")
-            : existsSync(repoPkg) ? repoPkg
             : join(globalNpm, name, "package.json");
           if (existsSync(pkgPath)) {
             version = JSON.parse(readFileSync(pkgPath, "utf-8")).version || "";
           }
         } catch {}
-        return { name: name, version: version, raw: p };
+        return { name: name, version: version, installed: version !== "", raw: p };
       });
   } catch { return []; }
 }
@@ -945,6 +953,8 @@ function getPluginActions(pitem) {
   if (pitem.type !== "npm") {
     a.push({ key: "update", label: "Force rebuild & deploy" });
     a.push({ key: "commits", label: "Select specific commit (Downgrade)" });
+  } else {
+    a.push({ key: "update-npm", label: "Update npm plugin" });
   }
   a.push({ key: "disable-plugin", label: "Disable plugin" });
   if (pitem.type !== "npm") {
@@ -1231,7 +1241,8 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
   var nameW = Math.min(32, Math.max(20, cols - 44));
 
   var plugins = loadPlugins();
-  var hasUpdater = plugins.some(function(p) { return p.name.includes("updater") || (p.url && p.url.includes("updater")); });
+  var hasUpdater = plugins.some(function(p) { return p.name.includes("updater") || (p.url && p.url.includes("updater")); })
+    || loadNpmPlugins().some(function(p) { return p.name.includes("updater"); });
   
   if (!hasUpdater) {
     if (process.env.CC_LAUNCHER === "1") {
@@ -1245,19 +1256,15 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
       globalKeyHandler = "updater_install";
       return;
     } else {
-      // In OC, only show NPM plugins until updater is installed
-      var npmCount = pluginItems.filter(function(p) { return p.type === "npm"; }).length;
-      pushBody("  " + MAGENTA + "#" + GRAY + " npm plugins" + RST, false);
-      pushBody("  " + GRAY + "Install the updater plugin via 'cc' to manage git plugins." + RST, false);
+      // OC mode: same interactive install prompt as CC mode
+      pushBody("  " + BOLD + RED + "Updater Plugin Missing" + RST, false);
+      pushBody("  The hub requires an updater plugin to manage installations.", false);
       pushBody("", false);
-      for (var i = 0; i < pluginItems.length; i++) {
-        if (pluginItems[i].type === "npm") {
-          buildPluginItem(pushBody, i, pluginItems[i], nameW, cols, i === pcursor);
-        }
-      }
+      pushBody("  Press " + BOLD + WHITE + "Enter" + RST + " to install the default updater plugin.", false);
       pushBody("", false);
       pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-      pushFoot("  " + DIM + "Q" + RST + " Quit");
+      pushFoot("  " + DIM + "Enter" + RST + " Install  " + DIM + "Q" + RST + " Quit");
+      globalKeyHandler = "updater_install";
       return;
     }
   } else {
@@ -1793,6 +1800,22 @@ function handlePluginKey(key) {
         flash(pitem.name + " disabled. Restart " + APP_NAME + " to unload.");
         mode = "list";
       }
+      else if (action === "update-npm") {
+        flash("Updating " + pitem.name + "...");
+        render();
+        var updater = getUpdater();
+        var err = "";
+        if (updater && typeof updater.updateNpmPlugin === "function") {
+          err = updater.updateNpmPlugin(pitem.name, CONFIG_DIR, 0) || "";
+        } else {
+          try { execSync("npm update -g " + pitem.name, { timeout: 60000, stdio: "ignore" }); }
+          catch(e) { err = e.message; }
+        }
+        pluginItems = buildCombinedPluginList();
+        if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+        flash(err ? pitem.name + ": " + err : pitem.name + " updated. Restart " + APP_NAME + " to apply.");
+        mode = "list";
+      }
       else if (action === "uninstall-npm") {
         confirmAction = { type: "uninstall-npm", target: pitem };
         confirmLabel = "Uninstall " + pitem.name + " globally via npm? (y to confirm)";
@@ -1863,10 +1886,15 @@ function handlePluginKey(key) {
       } else if (confirmAction && confirmAction.type === "uninstall-npm") {
         var cpitem = confirmAction.target;
         try {
-          execSync("npm uninstall -g " + cpitem.name, { timeout: 60000, stdio: "ignore" });
-          var cplugins = loadPlugins();
-          cplugins = cplugins.filter(function(r) { return r.name !== cpitem.name; });
-          savePlugins(cplugins);
+          var updater = getUpdater();
+          if (updater && typeof updater.uninstallNpmPlugin === "function") {
+            updater.uninstallNpmPlugin(cpitem.name, CONFIG_DIR);
+          } else {
+            execSync("npm uninstall -g " + cpitem.name, { timeout: 60000, stdio: "ignore" });
+            var cplugins = loadPlugins();
+            cplugins = cplugins.filter(function(r) { return r.name !== cpitem.name; });
+            savePlugins(cplugins);
+          }
           pluginItems = buildCombinedPluginList();
           if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
           flash(cpitem.name + " uninstalled. Restart " + APP_NAME + ".");
@@ -2362,34 +2390,20 @@ process.stdin.on("data", function(buf) {
     if (key === "enter" || key === "space") {
       process.stdout.write("\x1b[?25h\n\x1b[36mInstalling updater plugin...\x1b[0m\n");
       try {
-        // Hardcoded integration to bootstrap the updater plugin
         const { execSync } = require('child_process');
         const fs = require('fs');
         const path = require('path');
-        const isCC = process.env.CC_LAUNCHER === "1";
-        const reposDir = path.join(require('os').homedir(), ".config", isCC ? "claude" : "opencode", "repos");
-        if (!fs.existsSync(reposDir)) fs.mkdirSync(reposDir, { recursive: true });
-        
-        const updaterDir = path.join(reposDir, "plugin-updater");
-        // For development/local testing, if the directory already exists, we just use it
-        if (!fs.existsSync(updaterDir)) {
-           execSync("git clone https://github.com/intisy/plugin-updater.git", { cwd: reposDir, stdio: "inherit" });
+        // Install via npm globally
+        execSync("npm install -g plugin-updater", { stdio: "inherit" });
+        // Add to opencode.json plugin array
+        const ocPath = path.join(CONFIG_DIR, "opencode.json");
+        var ocData = {};
+        if (fs.existsSync(ocPath)) {
+          try { ocData = JSON.parse(fs.readFileSync(ocPath, "utf-8").replace(/^\s*\/\/[^\n]*/gm, "")); } catch {}
         }
-        
-        var pl = loadPlugins();
-        if (!pl.some(function(p) { return p.name === "plugin-updater"; })) {
-          pl.push({ name: "plugin-updater", url: "https://github.com/intisy/plugin-updater", autoUpdate: true, enabled: true });
-          savePlugins(pl);
-        }
-        
-        // Copy the built file (if any) or index.js to plugins dir
-        if (!fs.existsSync(PLUGINS_DIR)) fs.mkdirSync(PLUGINS_DIR, { recursive: true });
-        const pluginExecutionPath = path.join(PLUGINS_DIR, "plugin-updater");
-        if (!fs.existsSync(pluginExecutionPath)) fs.mkdirSync(pluginExecutionPath, { recursive: true });
-
-        if (fs.existsSync(path.join(updaterDir, "index.js"))) {
-          fs.copyFileSync(path.join(updaterDir, "index.js"), path.join(pluginExecutionPath, "index.js"));
-        }
+        if (!Array.isArray(ocData.plugin)) ocData.plugin = [];
+        if (!ocData.plugin.includes("plugin-updater")) ocData.plugin.unshift("plugin-updater");
+        fs.writeFileSync(ocPath, JSON.stringify(ocData, null, 2), "utf-8");
       } catch(e) {
         console.error("Failed to install updater:", e.message);
         setTimeout(function(){}, 2000);
