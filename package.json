@@ -1,21 +1,7 @@
-﻿{
-  "name": "core-loader",
-  "version": "1.1.0",
-  "description": "Shared TUI core for opencode-loader and claude-loader (used as a git submodule, not published).",
-  "main": "dist/tui.js",
-  "type": "module",
+{
   "private": true,
-  "license": "MIT",
-  "author": "intisy",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/intisy/core-loader.git"
-  },
-  "keywords": ["opencode", "claude", "tui", "core"],
-  "engines": { "node": ">=20.0.0" },
   "scripts": {
-    "build": "npx tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "npx tsc"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
@@ -23,4 +9,3 @@
     "typescript": "^6.0.3"
   }
 }
-
