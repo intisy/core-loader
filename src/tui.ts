@@ -131,6 +131,17 @@ function getUpdater() {
   return null;
 }
 
+function setupPlugin(repo, done) {
+  var updater = getUpdater();
+  if (!updater || typeof updater.updatePluginPublic !== "function") {
+    done("updater not available");
+    return;
+  }
+  Promise.resolve(updater.updatePluginPublic(repo.name, repo.url, repo.branch))
+    .then(function() { done(""); })
+    .catch(function(e) { done(String((e && e.message) || e)); });
+}
+
 var NPM_GLOBAL_ROOT = null;
 function getNpmGlobalRoot() {
   if (NPM_GLOBAL_ROOT !== null) return NPM_GLOBAL_ROOT;
@@ -882,12 +893,88 @@ function fetchCatalogsAsync() {
     });
   }
 
-  // only this app's ecosystem: claude-code plugins do not load in opencode and
-  // vice versa; topic and npm-keyword matches are precise, keyword searches were not
+  // the awesome-opencode list is the curated membership oracle: the fuzzy
+  // starred search may only contribute repos that the community list contains,
+  // which keeps popular plugins in and look-alike repos out
+  var awesomeSet = null;
+  function refreshMarketplace() {
+    MARKETPLACE_CATALOG.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
+    if (pluginSubPage === "marketplace") {
+      marketplaceItems = buildMarketplaceList();
+      scheduleRender();
+    }
+  }
+
+  function catalogHas(fullName) {
+    var key = fullName.toLowerCase();
+    return MARKETPLACE_CATALOG.find(function(e) { return (e.full_name || "").toLowerCase() === key; });
+  }
+
+  function searchPopular() {
+    catalogPending++;
+    exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=opencode+plugin+in:name,description&sort=stars&order=desc&per_page=100"', function(err, stdout) {
+      catalogPending = Math.max(0, catalogPending - 1);
+      if (catalogPending === 0) scheduleRender();
+      if (err || !stdout) return;
+      try {
+        var json = JSON.parse(stdout);
+        for (var it of (json.items || [])) {
+          var existing = catalogHas(it.full_name || "");
+          if (existing) {
+            existing.stars = it.stargazers_count;
+            if (!existing.desc) existing.desc = it.description || "";
+            continue;
+          }
+          if (!awesomeSet || !awesomeSet[(it.full_name || "").toLowerCase()]) continue;
+          MARKETPLACE_CATALOG.push({
+            name: it.name, desc: it.description || "", category: "Community",
+            stars: it.stargazers_count, author: it.owner.login, repoName: it.name,
+            full_name: it.full_name, url: "https://github.com/" + it.full_name + ".git",
+          });
+        }
+        refreshMarketplace();
+      } catch(e) {}
+    });
+  }
+
+  function fetchAwesomeList() {
+    catalogPending++;
+    exec(curlCmd + ' -s "https://raw.githubusercontent.com/awesome-opencode/awesome-opencode/main/README.md"', { maxBuffer: 4 * 1024 * 1024 }, function(err, stdout) {
+      catalogPending = Math.max(0, catalogPending - 1);
+      if (catalogPending === 0) scheduleRender();
+      if (!err && stdout) {
+        try {
+          var section = stdout;
+          var pStart = stdout.indexOf("PLUGINS</strong>");
+          var pEnd = stdout.indexOf("THEMES</strong>");
+          if (pStart !== -1 && pEnd > pStart) section = stdout.substring(pStart, pEnd);
+          awesomeSet = {};
+          var badgeRe = /badgen\.net\/github\/stars\/([^"\/\s]+)\/([^"\/\s]+)/g;
+          var m;
+          while ((m = badgeRe.exec(section))) {
+            var author = m[1];
+            var repoName = m[2];
+            awesomeSet[(author + "/" + repoName).toLowerCase()] = true;
+            if (catalogHas(author + "/" + repoName)) continue;
+            var descMatch = section.substring(m.index, m.index + 400).match(/<i>([^<]*)<\/i>/);
+            MARKETPLACE_CATALOG.push({
+              name: repoName, desc: descMatch ? descMatch[1] : "", category: "Curated",
+              author: author, repoName: repoName, full_name: author + "/" + repoName,
+              url: "https://github.com/" + author + "/" + repoName + ".git",
+            });
+          }
+          refreshMarketplace();
+        } catch(e) {}
+      }
+      searchPopular();
+    });
+  }
+
   var pluginTopic = APP_NAME === "Claude Code" ? "claude-code-plugin" : "opencode-plugin";
   searchGH("topic:" + pluginTopic, MARKETPLACE_CATALOG, 1);
   searchGH("topic:" + pluginTopic, MARKETPLACE_CATALOG, 2);
   searchNpm(pluginTopic);
+  if (APP_NAME !== "Claude Code") fetchAwesomeList();
   searchGH("topic:mcp-server", MCP_CATALOG, 1);
   searchGH("topic:mcp-server", MCP_CATALOG, 2);
 }
@@ -1877,22 +1964,22 @@ function handlePluginKey(key) {
           flash("All plugins are already up to date.");
         } else {
           var errors = [];
-          for (var pi of toUpdate) {
-            flash("Updating " + pi.name + "...");
-            render();
-            var e = "Updater plugin not found";
-            var updater = getUpdater();
-            if (updater) {
-              var plugins = loadPlugins();
-              var repo = plugins.find(function(r) { return r.name === pi.name; });
-              if (repo) e = updater.rebuild(repo);
-            }
-            if (e === "Success" || !e) e = "";
-            if (e) errors.push(pi.name + ": " + e);
-          }
-          pluginItems = buildCombinedPluginList();
-          if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
-          flash(errors.length > 0 ? errors.join("; ") : toUpdate.length + " plugin(s) updated. Restart " + APP_NAME + " to apply.");
+          var remaining = toUpdate.length;
+          flash("Updating " + remaining + " plugin(s)...");
+          render();
+          toUpdate.forEach(function(pi) {
+            var repo = loadPlugins().find(function(r) { return r.name === pi.name; });
+            setupPlugin(repo || pi, function(e) {
+              if (e) errors.push(pi.name + ": " + e);
+              remaining--;
+              if (remaining <= 0) {
+                pluginItems = buildCombinedPluginList();
+                if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+                flash(errors.length > 0 ? errors.join("; ") : toUpdate.length + " plugin(s) updated. Restart " + APP_NAME + " to apply.");
+                render();
+              }
+            });
+          });
         }
       }
       else if (key === "u") {
@@ -1900,17 +1987,13 @@ function handlePluginKey(key) {
           var p = pluginItems[pcursor];
           flash("Updating " + p.name + "...");
           render();
-            var err = "Updater plugin not found";
-            var updater = getUpdater();
-            if (updater) {
-              var plugins = loadPlugins();
-              var repo = plugins.find(function(r) { return r.name === p.name; });
-              if (repo) err = updater.rebuild(repo);
-            }
-            if (err === "Success" || !err) err = "";
-          pluginItems = buildCombinedPluginList();
-          if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
-          flash(err ? p.name + ": " + err : p.name + " updated. Restart " + APP_NAME + " to apply.");
+          var pRepo = loadPlugins().find(function(r) { return r.name === p.name; });
+          setupPlugin(pRepo || p, function(err) {
+            pluginItems = buildCombinedPluginList();
+            if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+            flash(err ? p.name + ": " + err : p.name + " updated. Restart " + APP_NAME + " to apply.");
+            render();
+          });
         }
       }
       else if (key === "d") {
@@ -1942,19 +2025,15 @@ function handlePluginKey(key) {
       var action = acts[pacursor].key;
       if (action === "update") {
         flash("Updating " + pitem.name + "...");
-        render();
-        var err = "Updater plugin not found";
-        var updater = getUpdater();
-        if (updater) {
-          var plugins = loadPlugins();
-          var repo = plugins.find(function(r) { return r.name === pitem.name; });
-          if (repo) err = updater.rebuild(repo);
-        }
-        if (err === "Success" || !err) err = "";
-        pluginItems = buildCombinedPluginList();
-        if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
-        flash(err ? pitem.name + ": " + err : pitem.name + " updated. Restart " + APP_NAME + " to apply.");
         mode = "list";
+        render();
+        var actRepo = loadPlugins().find(function(r) { return r.name === pitem.name; });
+        setupPlugin(actRepo || pitem, function(err) {
+          pluginItems = buildCombinedPluginList();
+          if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+          flash(err ? pitem.name + ": " + err : pitem.name + " updated. Restart " + APP_NAME + " to apply.");
+          render();
+        });
       }
       else if (action === "enable-auto" || action === "disable-auto") {
         var newVal = action === "enable-auto";
@@ -2014,10 +2093,15 @@ function handlePluginKey(key) {
         var match = plugins.find(function(r) { return r.name === pitem.name; });
         if (match) { delete match.enabled; } else { plugins.push({ name: pitem.name }); }
         savePlugins(plugins);
-        pluginItems = buildCombinedPluginList();
-        if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
-        flash(pitem.name + " enabled. Use Update to deploy.");
+        flash("Setting up " + pitem.name + "...");
         mode = "list";
+        render();
+        setupPlugin(match || { name: pitem.name, url: pitem.url }, function(setupErr) {
+          pluginItems = buildCombinedPluginList();
+          if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+          flash(setupErr ? pitem.name + ": " + setupErr : pitem.name + " enabled and deployed. Restart " + APP_NAME + " to load.");
+          render();
+        });
       }
       else if (action === "commits") {
         var dir = join(REPOS_DIR, pitem.folderName);
