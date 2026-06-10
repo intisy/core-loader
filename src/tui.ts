@@ -795,13 +795,17 @@ function uninstallMcpServer(name) {
 
 var { exec } = require("child_process");
 var catalogFetched = false;
+var catalogPending = 0;
 function fetchCatalogsAsync() {
   if (catalogFetched) return;
   catalogFetched = true;
   
   var curlCmd = process.platform === "win32" ? "curl.exe" : "curl";
   function searchGH(query, catalog, pageNum) {
+    catalogPending++;
     exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=' + query + '&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
+      catalogPending = Math.max(0, catalogPending - 1);
+      if (catalogPending === 0) scheduleRender();
       if (!err && stdout) {
         try {
           var json = JSON.parse(stdout);
@@ -861,9 +865,10 @@ function buildMarketplaceList() {
   fetchCatalogsAsync();
   var installed = loadPlugins();
   var installedNames = installed.map(function(p) { return p.name; });
-  var res = MARKETPLACE_CATALOG.filter(function(m) {
+  var res = MARKETPLACE_CATALOG.map(function(m) {
     var repoName = m.repoName || m.name;
-    return installedNames.indexOf(m.name) === -1 && installedNames.indexOf(repoName) === -1;
+    var isInstalled = installedNames.indexOf(m.name) !== -1 || installedNames.indexOf(repoName) !== -1;
+    return Object.assign({}, m, { installed: isInstalled });
   });
   if (inputBuf) {
     var q = inputBuf.toLowerCase();
@@ -977,6 +982,58 @@ function scheduleRender() {
 
 function hints(pairs) {
   return "  " + pairs.map(function(p) { return DIM + p[0] + RST + " " + p[1]; }).join("  ");
+}
+
+var SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+var spinnerTick = 0;
+var spinnerTimer = null;
+function spinnerFrame() { return CYAN + SPINNER_FRAMES[spinnerTick % SPINNER_FRAMES.length] + RST; }
+// runs only while something is loading or a "..." message is on screen
+function updateSpinner() {
+  var active = catalogPending > 0 || (message && message.indexOf("...") !== -1);
+  if (active && !spinnerTimer) {
+    spinnerTimer = setInterval(function() { spinnerTick++; render(); }, 120);
+  } else if (!active && spinnerTimer) {
+    clearInterval(spinnerTimer);
+    spinnerTimer = null;
+  }
+}
+
+function messageLine(cols) {
+  var prefix = message.indexOf("...") !== -1 ? spinnerFrame() + " " : "  ";
+  return "  " + GREEN + prefix + trunc(message, cols - 6) + RST;
+}
+
+var helpOpen = false;
+var HELP_BINDINGS = {
+  projects: [
+    ["^v / WS", "Move"], ["Enter / Space", "Open actions"], ["O", "Open project"],
+    ["P", "Pin / unpin"], ["H", "Hide project"], ["U", "Unhide all"],
+    ["C", "Open custom path"], ["<- ->", "Switch page"], ["Q / Esc", "Quit"],
+  ],
+  plugins: [
+    ["^v / WS", "Move"], ["Enter", "Plugin actions"], ["Tab", "Installed / Marketplace"],
+    ["F", "Check for updates"], ["R", "Refresh list / catalog"], ["U", "Update selected"],
+    ["A", "Update all"], ["D", "Disable selected"], ["I", "Quick install (marketplace)"],
+    ["/", "Search (marketplace)"], ["<- ->", "Switch page"], ["Q / Esc", "Quit"],
+  ],
+  mcp: [
+    ["^v / WS", "Move"], ["Enter", "Server actions"], ["Tab", "Installed / Marketplace"],
+    ["I", "Install selected"], ["X", "Uninstall selected"], ["R", "Refresh catalog"],
+    ["/", "Search"], ["<- ->", "Switch page"], ["Q / Esc", "Quit"],
+  ],
+};
+
+function buildHelp(pushBody, pushFoot, cols, barW) {
+  var binds = HELP_BINDINGS[page] || [];
+  pushBody("  " + MAGENTA + "#" + GRAY + " Keyboard shortcuts" + RST, false);
+  pushBody("", false);
+  for (var i = 0; i < binds.length; i++) {
+    pushBody("    " + BOLD + WHITE + pad(binds[i][0], 16) + RST + GRAY + binds[i][1] + RST, false);
+  }
+  pushBody("", false);
+  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+  pushFoot(hints([["Any key", "Close"]]));
 }
 
 // Project actions
@@ -1220,7 +1277,7 @@ function buildProjects(pushBody, pushFoot, cols, barW) {
   pushBody("", false);
 
   if (message) {
-    pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+    pushFoot(messageLine(cols));
   }
   pushFoot("  " + GRAY + "-".repeat(barW) + RST);
   
@@ -1231,7 +1288,7 @@ function buildProjects(pushBody, pushFoot, cols, barW) {
     pushFoot("  " + CYAN + inputLabel + RST + displayInput + BOLD + "|" + RST);
     pushFoot(hints([["Enter", "Confirm"], ["Esc", "Cancel"]]));
   } else if (mode === "list") {
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["P", "Pin"], ["H", "Hide"], ["O", "Open"], ["C", "Custom"], ["Q", "Quit"]]));
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["O", "Open"], ["?", "Help"], ["Q", "Quit"]]));
   } else {
     pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
   }
@@ -1335,7 +1392,7 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
     pushBody("", false);
     
     if (message) {
-      pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+      pushFoot(messageLine(cols));
     }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
     pushFoot(hints([["^v/WS", "Move"], ["Enter", "Checkout"], ["Esc", "Cancel"]]));
@@ -1360,7 +1417,7 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
       }
     }
     pushBody("", false);
-    if (message) pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+    if (message) pushFoot(messageLine(cols));
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
     pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
     return;
@@ -1399,7 +1456,7 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
         pushBody("  " + MAGENTA + "#" + GRAY + " " + trunc(mitem.name, cols - 6) + RST, false);
         pushBody("  " + GRAY + trunc(mitem.desc || mitem.command + " " + (mitem.args || []).join(" "), cols - 6) + RST, false);
         pushBody("", false);
-        var mkActs = [{ key: "install", label: "Install" }];
+        var mkActs = mitem.installed ? [] : [{ key: "install", label: "Install" }];
         if (mitem.url) mkActs.push({ key: "browser", label: "Open in browser" });
         mkActs.push({ key: "cancel", label: "Cancel" });
         for (var ai = 0; ai < mkActs.length; ai++) {
@@ -1419,7 +1476,13 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
     }
     pushBody("  " + MAGENTA + "#" + GRAY + " Marketplace (" + marketplaceItems.length + " available)" + (mode === "search" || inputBuf ? " " + BG_SEL + " Search: " + inputBuf + (mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST), false);
     if (marketplaceItems.length === 0) {
-      pushBody("  " + GRAY + (inputBuf ? "No results for \"" + inputBuf + "\"" : "All plugins installed!") + RST, false);
+      if (inputBuf) {
+        pushBody("  " + GRAY + "No results for \"" + inputBuf + "\"" + RST, false);
+      } else if (catalogPending > 0) {
+        pushBody("  " + spinnerFrame() + GRAY + " Loading marketplace catalog..." + RST, false);
+      } else {
+        pushBody("  " + GRAY + "Marketplace catalog is empty. Press R to retry." + RST, false);
+      }
     }
     for (var mi = 0; mi < marketplaceItems.length; mi++) {
       var mitem = marketplaceItems[mi];
@@ -1436,15 +1499,16 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
       var descVis = stringWidth(descText);
       var gapW = Math.max(1, cols - usedW - descVis);
       var starStr = starRaw ? (YELLOW + " ".repeat(gapW) + "★" + mitem.stars + RST) : "";
-      pushBody("  " + mbg + marrow + GRAY + "○" + RST + " " + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
+      var mIcon = mitem.installed ? (GREEN + "●" + RST) : (GRAY + "○" + RST);
+      pushBody("  " + mbg + marrow + mIcon + " " + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
       if (msel && mitem.url) {
         pushBody("  " + GRAY + "     " + trunc(mitem.url, cols - 10) + RST, msel);
       }
     }
     pushBody("", false);
-    if (message) { pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST); }
+    if (message) { pushFoot(messageLine(cols)); }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["I", "Install"], ["/", "Search"], ["R", "Refresh"], ["Tab", "Switch"], ["Q", "Quit"]]));
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["/", "Search"], ["?", "Help"], ["Q", "Quit"]]));
     return;
   }
 
@@ -1506,11 +1570,11 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
   pushBody("", false);
   
   if (message) {
-    pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+    pushFoot(messageLine(cols));
   }
   pushFoot("  " + GRAY + "-".repeat(barW) + RST);
 
-  pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["R", "Refresh"], ["U", "Update"], ["A", "Update all"], ["D", "Disable"], ["Q", "Quit"]]));
+  pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["Tab", "Switch"], ["?", "Help"], ["Q", "Quit"]]));
 }
 
 // Main render
@@ -1546,13 +1610,16 @@ function render() {
   pushHead("");
 
   // 2. Build Body & Footer
-  if (page === "projects") {
+  if (helpOpen) {
+    buildHelp(pushBody, pushFoot, cols, barW);
+  } else if (page === "projects") {
     buildProjects(pushBody, pushFoot, cols, barW);
   } else if (page === "mcp") {
     buildMcp(pushBody, pushFoot, cols, barW);
   } else {
     buildPlugins(pushBody, pushFoot, cols, barW);
   }
+  updateSpinner();
 
   // 3. Viewport calculation
   var maxBody = Math.max(2, totalRows - headLines.length - footLines.length);
@@ -1616,6 +1683,8 @@ function render() {
 
 // Key handling
 function handleKey(key) {
+  if (helpOpen) { helpOpen = false; return; }
+  if (key === "?" && mode === "list") { helpOpen = true; return; }
   // Page switching with left/right (only in list mode, not in actions/input)
   if ((mode === "list") && (key === "left" || key === "right")) {
     var pages = ["projects", "plugins", "mcp"];
@@ -1705,7 +1774,7 @@ function handlePluginKey(key) {
       if (mkMode === "actions") {
         var mitem = marketplaceItems[mkCursor];
         if (!mitem) { mkMode = "browse"; return; }
-        var mkActs = [{ key: "install", label: "Install" }];
+        var mkActs = mitem.installed ? [] : [{ key: "install", label: "Install" }];
         if (mitem.url) mkActs.push({ key: "browser", label: "Open in browser" });
         mkActs.push({ key: "cancel", label: "Cancel" });
         if (key === "up" || key === "w") { mkAcursor = Math.max(0, mkAcursor - 1); }
@@ -1748,6 +1817,7 @@ function handlePluginKey(key) {
       else if (key === "i") {
         if (marketplaceItems.length > 0) {
           var quickItem = marketplaceItems[mkCursor];
+          if (quickItem.installed) { flash(quickItem.name + " is already installed."); return; }
           flash("Installing " + (quickItem.name || quickItem.repoName) + "...");
           render();
           var quickErr = installMarketplacePlugin(quickItem);
@@ -2093,7 +2163,7 @@ function parseKey(buf) {
   if (buf[0] === 3) { cleanup(); process.exit(1); }
   if (buf[0] === 9) return "tab";
   var ch = String.fromCharCode(buf[0]).toLowerCase();
-  if ("wsadqpchofuximy/".indexOf(ch) !== -1) return ch;
+  if ("wsadqpchofuximyr/?".indexOf(ch) !== -1) return ch;
   return null;
 }
 
@@ -2177,10 +2247,10 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
     }
     pushBody("", false);
     if (message) {
-      pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+      pushFoot(messageLine(cols));
     }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["X", "Uninstall"], ["R", "Refresh"], ["Tab", "Switch"], ["Q", "Quit"]]));
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["Tab", "Switch"], ["?", "Help"], ["Q", "Quit"]]));
   } else {
     // Marketplace
     mcpItems = buildMcpList("All");
@@ -2209,10 +2279,10 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
     }
     pushBody("", false);
     if (message) {
-      pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+      pushFoot(messageLine(cols));
     }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["I", "Install"], ["/", "Search"], ["R", "Refresh"], ["Tab", "Switch"], ["Q", "Quit"]]));
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["/", "Search"], ["?", "Help"], ["Q", "Quit"]]));
   }
 }
 
@@ -2423,6 +2493,9 @@ if (arg) {
   process.exit(42);
 }
 
+// disable any mouse reporting a previous program left enabled — pointer
+// movement otherwise arrives as input bytes and triggers random key handlers
+process.stderr.write("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l");
 hideCur();
 render();
 process.stdin.setRawMode(true);
