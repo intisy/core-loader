@@ -799,19 +799,90 @@ function uninstallMcpServer(name) {
 var { exec } = require("child_process");
 var catalogFetched = false;
 var catalogPending = 0;
+var CATALOG_CACHE_PATH = join(CACHE_DIR, "marketplace-catalog.json");
+
+function invalidateCatalogCache() {
+  try { unlinkSync(CATALOG_CACHE_PATH); } catch {}
+}
+
+function loadCatalogCache() {
+  try {
+    if (!existsSync(CATALOG_CACHE_PATH)) return false;
+    var cached = JSON.parse(readFileSync(CATALOG_CACHE_PATH, "utf-8"));
+    if (!cached || Date.now() - cached.time > 6 * 3600000) return false;
+    if (!Array.isArray(cached.marketplace) || cached.marketplace.length === 0) return false;
+    for (var ce of cached.marketplace) MARKETPLACE_CATALOG.push(ce);
+    for (var me of (cached.mcp || [])) {
+      if (!MCP_CATALOG.find(function(x) { return x.name === me.name; })) MCP_CATALOG.push(me);
+    }
+    tuiLog("marketplace catalog loaded from cache");
+    return true;
+  } catch { return false; }
+}
+
 function fetchCatalogsAsync() {
   if (catalogFetched) return;
   catalogFetched = true;
-  
+  if (loadCatalogCache()) return;
+
   var curlCmd = process.platform === "win32" ? "curl.exe" : "curl";
+  var enrichedOnce = false;
+
+  function saveCatalog() {
+    try {
+      if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+      writeFileSync(CATALOG_CACHE_PATH, JSON.stringify({ time: Date.now(), marketplace: MARKETPLACE_CATALOG, mcp: MCP_CATALOG }));
+      tuiLog("marketplace catalog cached (" + MARKETPLACE_CATALOG.length + " plugins)");
+    } catch {}
+  }
+
+  // search-API star matching breaks on renamed repos and rate limits; per-repo
+  // lookups use the larger core API budget and follow renames, then the result
+  // is cached on disk so the budget is spent once, not per TUI open
+  function enrichCuratedStars() {
+    var missing = MARKETPLACE_CATALOG.filter(function(e) { return e.stars == null && e.full_name; }).slice(0, 40);
+    tuiLog("enriching stars for " + missing.length + " catalog entries");
+    for (var entry of missing) {
+      (function(target) {
+        catalogPending++;
+        exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/repos/' + target.full_name + '"', function(err, stdout) {
+          if (!err && stdout) {
+            try {
+              var repo = JSON.parse(stdout);
+              if (repo && typeof repo.stargazers_count === "number") {
+                target.stars = repo.stargazers_count;
+                if (!target.desc && repo.description) target.desc = repo.description;
+              } else if (repo && repo.message) {
+                tuiLog("github repos api (" + target.full_name + "): " + repo.message);
+              }
+            } catch {}
+          }
+          refreshMarketplace();
+          fetchDone();
+        });
+      })(entry);
+    }
+  }
+
+  function fetchDone() {
+    catalogPending = Math.max(0, catalogPending - 1);
+    if (catalogPending > 0) return;
+    scheduleRender();
+    if (!enrichedOnce) {
+      enrichedOnce = true;
+      enrichCuratedStars();
+      if (catalogPending > 0) return;
+    }
+    saveCatalog();
+  }
   function searchGH(query, catalog, pageNum) {
     catalogPending++;
     exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=' + query + '&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
-      catalogPending = Math.max(0, catalogPending - 1);
-      if (catalogPending === 0) scheduleRender();
+      fetchDone();
       if (!err && stdout) {
         try {
           var json = JSON.parse(stdout);
+          if (json.message) tuiLog("github search: " + json.message);
           if (json.items) {
             for (var i = 0; i < json.items.length; i++) {
               var it = json.items[i];
@@ -856,8 +927,7 @@ function fetchCatalogsAsync() {
   function searchNpm(keyword) {
     catalogPending++;
     exec(curlCmd + ' -s "https://registry.npmjs.org/-/v1/search?text=keywords:' + keyword + '&size=100"', function(err, stdout) {
-      catalogPending = Math.max(0, catalogPending - 1);
-      if (catalogPending === 0) scheduleRender();
+      fetchDone();
       if (err || !stdout) return;
       try {
         var json = JSON.parse(stdout);
@@ -913,11 +983,11 @@ function fetchCatalogsAsync() {
   function searchPopular(pageNum) {
     catalogPending++;
     exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=opencode&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
-      catalogPending = Math.max(0, catalogPending - 1);
-      if (catalogPending === 0) scheduleRender();
+      fetchDone();
       if (err || !stdout) return;
       try {
         var json = JSON.parse(stdout);
+        if (json.message) tuiLog("github search: " + json.message);
         for (var it of (json.items || [])) {
           var existing = catalogHas(it.full_name || "");
           if (existing) {
@@ -940,8 +1010,7 @@ function fetchCatalogsAsync() {
   function fetchAwesomeList() {
     catalogPending++;
     exec(curlCmd + ' -s "https://raw.githubusercontent.com/awesome-opencode/awesome-opencode/main/README.md"', { maxBuffer: 4 * 1024 * 1024 }, function(err, stdout) {
-      catalogPending = Math.max(0, catalogPending - 1);
-      if (catalogPending === 0) scheduleRender();
+      fetchDone();
       if (!err && stdout) {
         try {
           var section = stdout;
@@ -1924,6 +1993,7 @@ function handlePluginKey(key) {
       }
       else if (key === "/") { mode = "search"; return; }
       else if (key === "r") {
+        invalidateCatalogCache();
         catalogFetched = false;
         fetchCatalogsAsync();
         marketplaceItems = buildMarketplaceList();
@@ -2486,6 +2556,7 @@ function handleMcpKey(key) {
       }
     }
     else if (key === "r") {
+      invalidateCatalogCache();
       catalogFetched = false;
       mcpItems = buildMcpList("All");
       flash("Refreshing catalog...");
