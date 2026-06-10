@@ -838,15 +838,54 @@ function fetchCatalogsAsync() {
     });
   }
 
-  // Fetch both plugin topics so popular plugins from either ecosystem appear
-  // plus MCP servers. Limited to page 1 each to stay within unauthenticated rate limits (10 req/min)
-  searchGH("topic:claude-code-plugin", MARKETPLACE_CATALOG, 1);
-  searchGH("topic:opencode-plugin", MARKETPLACE_CATALOG, 1);
+  function searchNpm(keyword) {
+    catalogPending++;
+    exec(curlCmd + ' -s "https://registry.npmjs.org/-/v1/search?text=keywords:' + keyword + '&size=100"', function(err, stdout) {
+      catalogPending = Math.max(0, catalogPending - 1);
+      if (catalogPending === 0) scheduleRender();
+      if (err || !stdout) return;
+      try {
+        var json = JSON.parse(stdout);
+        for (var obj of (json.objects || [])) {
+          var pkg = obj.package || {};
+          var repoUrl = ((pkg.links && pkg.links.repository) || "").replace(/^git\+/, "");
+          if (!repoUrl) continue;
+          var repoMatch = repoUrl.match(/([^\/]+)\/([^\/]+?)(\.git)?$/);
+          if (!repoMatch) continue;
+          var author = repoMatch[1];
+          var repoName = repoMatch[2];
+          var shortName = pkg.name.replace(/^@[^\/]+\//, "");
+          var exists = MARKETPLACE_CATALOG.find(function(e) {
+            return e.name === shortName || (e.repoName || e.name) === repoName;
+          });
+          if (exists) continue;
+          MARKETPLACE_CATALOG.push({
+            name: shortName,
+            desc: pkg.description || "",
+            category: "Community",
+            author: author,
+            repoName: repoName,
+            full_name: author + "/" + repoName,
+            url: repoUrl.endsWith(".git") ? repoUrl : repoUrl + ".git",
+          });
+        }
+        MARKETPLACE_CATALOG.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
+        if (pluginSubPage === "marketplace") {
+          marketplaceItems = buildMarketplaceList();
+          scheduleRender();
+        }
+      } catch(e) {}
+    });
+  }
+
+  // only this app's ecosystem: claude-code plugins do not load in opencode and
+  // vice versa; topic and npm-keyword matches are precise, keyword searches were not
+  var pluginTopic = APP_NAME === "Claude Code" ? "claude-code-plugin" : "opencode-plugin";
+  searchGH("topic:" + pluginTopic, MARKETPLACE_CATALOG, 1);
+  searchGH("topic:" + pluginTopic, MARKETPLACE_CATALOG, 2);
+  searchNpm(pluginTopic);
   searchGH("topic:mcp-server", MCP_CATALOG, 1);
   searchGH("topic:mcp-server", MCP_CATALOG, 2);
-  // Fallback: keyword search for popular plugins that lack proper topics
-  searchGH("claude+code+plugin+in:name,description", MARKETPLACE_CATALOG, 1);
-  searchGH("opencode+plugin+in:name,description", MARKETPLACE_CATALOG, 1);
 }
 
 function buildMarketplaceList() {
@@ -1627,54 +1666,36 @@ function render() {
   if (page === "projects") activeScroll = scrollOff;
   else if (page === "mcp") activeScroll = mcpScrollOff;
   else if (mode === "pcommits") activeScroll = cscrollOff;
+  else if (page === "plugins" && pluginSubPage === "marketplace") activeScroll = mkScrollOff;
   else activeScroll = pscrollOff;
-  
+
   if (bodyLines.length > maxBody) {
-    if (selStart < activeScroll) activeScroll = selStart;
-    if (selEnd > activeScroll + maxBody) activeScroll = selEnd - maxBody;
-    if (activeScroll > bodyLines.length - maxBody) activeScroll = bodyLines.length - maxBody;
+    // marker rows are always reserved so the geometry never shifts between frames
+    var innerH = maxBody - 2;
+    var contextLines = 3;
+    if (selStart - activeScroll < contextLines) activeScroll = Math.max(0, selStart - contextLines);
+    if (selEnd - activeScroll > innerH) activeScroll = selEnd - innerH;
+    if (activeScroll > bodyLines.length - innerH) activeScroll = bodyLines.length - innerH;
     if (activeScroll < 0) activeScroll = 0;
-    
+
     if (page === "projects") scrollOff = activeScroll;
     else if (page === "mcp") mcpScrollOff = activeScroll;
     else if (mode === "pcommits") cscrollOff = activeScroll;
+    else if (page === "plugins" && pluginSubPage === "marketplace") mkScrollOff = activeScroll;
     else pscrollOff = activeScroll;
-    
-    var origLen = bodyLines.length;
-    
-    var hasAbove = activeScroll > 0;
-    var hasBelow = activeScroll + maxBody < origLen;
-    
-    var sliceLen = maxBody;
-    if (hasAbove) sliceLen--;
-    if (hasBelow) sliceLen--;
-    
-    hasBelow = activeScroll + sliceLen < origLen;
-    if (hasBelow && !hasAbove && activeScroll > 0) {
-       // Re-evaluate in case reducing sliceLen triggered hasAbove
-       hasAbove = true;
-       sliceLen--;
-       hasBelow = activeScroll + sliceLen < origLen;
-    }
-    
-    var visibleBody = bodyLines.slice(activeScroll, activeScroll + sliceLen);
-    
-    if (hasAbove) {
-      visibleBody.unshift("  " + GRAY + "     ^ " + activeScroll + " more" + RST);
-    }
-    if (hasBelow) {
-      visibleBody.push("  " + GRAY + "     v " + (origLen - (activeScroll + sliceLen)) + " more" + RST);
-    }
-    
+
+    var hiddenAbove = activeScroll;
+    var hiddenBelow = bodyLines.length - (activeScroll + innerH);
+    var visibleBody = bodyLines.slice(activeScroll, activeScroll + innerH);
+    visibleBody.unshift(hiddenAbove > 0 ? "  " + GRAY + "     ^ " + hiddenAbove + " more" + RST : "");
+    visibleBody.push(hiddenBelow > 0 ? "  " + GRAY + "     v " + hiddenBelow + " more" + RST : "");
     bodyLines = visibleBody;
   }
 
-  // 4. Render to screen
-  // DEC 2026 synchronized output: the terminal paints the frame atomically
+  // no newline after the last row: writing into the bottom-right corner would
+  // scroll the terminal and shift the whole frame every redraw
   _buf = "\x1b[?2026h" + E + "H";
-  for (var h of headLines) _buf += h + CLR + "\n";
-  for (var b of bodyLines) _buf += b + CLR + "\n";
-  for (var f of footLines) _buf += f + CLR + "\n";
+  _buf += headLines.concat(bodyLines, footLines).map(function(l) { return l + CLR; }).join("\n");
   _buf += E + "J" + "\x1b[?2026l";
 
   process.stderr.write(_buf);
