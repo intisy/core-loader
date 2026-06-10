@@ -910,9 +910,9 @@ function fetchCatalogsAsync() {
     return MARKETPLACE_CATALOG.find(function(e) { return (e.full_name || "").toLowerCase() === key; });
   }
 
-  function searchPopular() {
+  function searchPopular(pageNum) {
     catalogPending++;
-    exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=opencode+plugin+in:name,description&sort=stars&order=desc&per_page=100"', function(err, stdout) {
+    exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=opencode&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
       catalogPending = Math.max(0, catalogPending - 1);
       if (catalogPending === 0) scheduleRender();
       if (err || !stdout) return;
@@ -966,7 +966,10 @@ function fetchCatalogsAsync() {
           refreshMarketplace();
         } catch(e) {}
       }
-      searchPopular();
+      // the broad starred search supplies star counts for the curated entries,
+      // whose badge images carry no numbers; membership keeps it precise
+      searchPopular(1);
+      searchPopular(2);
     });
   }
 
@@ -1906,7 +1909,7 @@ function handlePluginKey(key) {
               var openCmd = process.platform === "win32" ? "start \"\" \"" + mitem.url + "\"" : process.platform === "darwin" ? "open \"" + mitem.url + "\"" : "xdg-open \"" + mitem.url + "\"";
               execSync(openCmd, { timeout: 5000, stdio: "ignore" });
               flash("Opened in browser");
-            } catch(e) { flash("Could not open browser"); }
+            } catch(e) { flash("No browser available: " + mitem.url); }
           }
           mkMode = "browse";
         }
@@ -2520,7 +2523,7 @@ function handleMcpKey(key) {
             var openCmd = process.platform === "win32" ? "start \"\" \"" + npmUrl + "\"" : process.platform === "darwin" ? "open \"" + npmUrl + "\"" : "xdg-open \"" + npmUrl + "\"";
             execSync(openCmd, { timeout: 5000, stdio: "ignore" });
             flash("Opened in browser");
-          } catch(e) { flash("Could not open browser"); }
+          } catch(e) { flash("No browser available: " + npmUrl); }
         }
         mcpMode = "catalog";
       } else {
