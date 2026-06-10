@@ -15,7 +15,11 @@ var NPM_PKG = process.env.HUB_NPM_PKG || "opencode-ai";
 var CONFIG_DIR = process.env.HUB_CONFIG_DIR || join(HOME, ".config", "opencode");
 var CACHE_PKG_DIR = process.env.HUB_CACHE_PKG_DIR || join(CONFIG_DIR, "cache", "node_modules");
 
-var DB_PATH = process.env.HUB_DB_PATH || join(CONFIG_DIR, "opencode.db");
+// opencode keeps its session database in the XDG data dir, not the config dir
+var DB_PATH = process.env.HUB_DB_PATH || [
+  join(HOME, ".local", "share", "opencode", "opencode.db"),
+  join(CONFIG_DIR, "opencode.db"),
+].find(function(p) { return existsSync(p); }) || join(HOME, ".local", "share", "opencode", "opencode.db");
 var globalKeyHandler = null;
 var CONFIG_FOLDER = join(CONFIG_DIR, "config");
 var CACHE_DIR = join(CONFIG_DIR, "cache");
@@ -24,6 +28,18 @@ var UPDATE_CHECK_PATH = join(CACHE_DIR, "oc-last-update-check");
 var PLUGINS_JSON = join(CONFIG_FOLDER, "plugins.json");
 var REPOS_DIR = join(CONFIG_DIR, "repos");
 var PLUGINS_DIR = join(CONFIG_DIR, "plugin");
+
+// anything printed to the terminal corrupts the TUI — diagnostics go to a file
+var TUI_START_TIME = new Date().toISOString().replace(/:/g, "-").split(".")[0];
+function tuiLog(msg) {
+  try {
+    var dateStr = new Date().toISOString().split("T")[0];
+    var logsDir = join(CONFIG_DIR, "logs", dateStr);
+    if (!existsSync(logsDir)) mkdirSync(logsDir, { recursive: true });
+    require("fs").appendFileSync(join(logsDir, "loader-tui-" + TUI_START_TIME + ".log"),
+      "[" + new Date().toISOString() + "] " + msg + "\n");
+  } catch {}
+}
 
 global.OpenCodeAPI = {
   getReposDir: function() { return REPOS_DIR; },
@@ -100,7 +116,7 @@ function getUpdater() {
       delete require.cache[require.resolve(updaterPath)];
       return require(updaterPath);
     } catch(e) {
-      console.error("Failed to load updater plugin from file", e);
+      tuiLog("Failed to load updater plugin from " + updaterPath + ": " + e);
     }
   }
   // Fallback: npm-installed updater (resolved via node module resolution)
@@ -217,18 +233,26 @@ function checkForUpdates() {
     if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
     writeFileSync(UPDATE_CHECK_PATH, String(Date.now()));
 
-    var installed = execSync(CLI_CMD + " --version", { encoding: "utf-8", timeout: 10000 }).trim();
-    var latest = execSync("npm view " + NPM_PKG + " version", { encoding: "utf-8", timeout: 15000 }).trim();
-
-    if (!latest || !installed || latest === installed) return;
-
-    process.stderr.write("\x1b[33m  > Updating OpenCode: " + installed + " -> " + latest + "\x1b[0m\n");
-    execSync("npm install -g " + NPM_PKG + "@latest", { stdio: "inherit", timeout: 120000 });
-    process.stderr.write("\x1b[32m  > Updated to " + latest + "\x1b[0m\n\n");
-  } catch (e) {}
+    exec(CLI_CMD + " --version", { timeout: 15000 }, function(versionError, installedOut) {
+      if (versionError) return;
+      exec("npm view " + NPM_PKG + " version", { timeout: 20000 }, function(viewError, latestOut) {
+        if (viewError) return;
+        var installed = (installedOut || "").trim();
+        var latest = (latestOut || "").trim();
+        if (!latest || !installed || latest === installed) return;
+        flash("Updating " + APP_NAME + " " + installed + " -> " + latest + " in the background");
+        render();
+        exec("npm install -g " + NPM_PKG + "@latest", { timeout: 180000 }, function(installError) {
+          tuiLog(installError ? "self-update failed: " + installError.message : "self-updated to " + latest);
+          if (!installError) { flash(APP_NAME + " updated to " + latest + " (restart to apply)"); render(); }
+        });
+      });
+    });
+  } catch (e) { tuiLog("update check failed: " + e.message); }
 }
 
-checkForUpdates();
+// deferred so the TUI renders immediately instead of waiting on version checks
+setTimeout(checkForUpdates, 1500);
 
 // Project launcher data
 
@@ -443,9 +467,9 @@ function loadPlugins() {
 
 function savePlugins(plugins) {
   if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
-  writeFileSync(PLUGINS_JSON, JSON.stringify(plugins, null, 2), "utf-8");
-  // Dual-write for backward compat
-  try { writeFileSync(join(CONFIG_DIR, "plugins.json"), JSON.stringify(plugins, null, 2), "utf-8"); } catch {}
+  // config/ is always preferred; the top-level file only when config/ cannot exist
+  var target = existsSync(CONFIG_FOLDER) ? PLUGINS_JSON : join(CONFIG_DIR, "plugins.json");
+  writeFileSync(target, JSON.stringify(plugins, null, 2), "utf-8");
 }
 
 function gitText(args, cwd) {
@@ -811,10 +835,10 @@ function fetchCatalogsAsync() {
             catalog.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
             if (catalog === MARKETPLACE_CATALOG && pluginSubPage === "marketplace") {
                marketplaceItems = buildMarketplaceList();
-               render();
+               scheduleRender();
             } else if (catalog === MCP_CATALOG && page === "mcp" && mcpSubPage === "marketplace") {
                mcpItems = buildMcpList("All");
-               render();
+               scheduleRender();
             }
           }
         } catch(e) {}
@@ -877,15 +901,13 @@ function buildCombinedPluginList() {
   var git = buildPluginList();
   var savedPlugins = loadPlugins();
   var npm = loadNpmPlugins().map(function(np) {
-    var npmMatch = savedPlugins.find(function(r) { return r.name === np.name; });
-    var npmEnabled = npmMatch ? (npmMatch.enabled !== false) : true;
     return {
       type: "npm",
       name: np.name,
       version: np.version,
       raw: np.raw,
-      // filler fields so shared code doesn't crash
-      enabled: npmEnabled,
+      // npm plugins have no disable state — the app loads whatever opencode.json lists
+      enabled: true,
       autoUpdate: false,
       installed: !!np.version,
       deployed: !!np.version,
@@ -946,6 +968,17 @@ function flash(msg) {
   msgTimeout = setTimeout(function() { message = ""; render(); }, 2500);
 }
 
+// async catalog fetches arrive in bursts — coalesce their redraws
+var renderTimer = null;
+function scheduleRender() {
+  if (renderTimer) return;
+  renderTimer = setTimeout(function() { renderTimer = null; render(); }, 120);
+}
+
+function hints(pairs) {
+  return "  " + pairs.map(function(p) { return DIM + p[0] + RST + " " + p[1]; }).join("  ");
+}
+
 // Project actions
 
 function getActions(item) {
@@ -966,6 +999,13 @@ function getActions(item) {
 
 function getPluginActions(pitem) {
   var a = [];
+  if (pitem.type === "npm") {
+    // managed via opencode.json — no disable state, only update or uninstall
+    a.push({ key: "update-npm", label: "Update npm plugin" });
+    a.push({ key: "uninstall-npm", label: "Uninstall npm plugin (removes from opencode.json)" });
+    a.push({ key: "cancel", label: "Cancel" });
+    return a;
+  }
   if (!pitem.enabled) {
     a.push({ key: "enable-plugin", label: "Enable plugin" });
     a.push({ key: "cancel", label: "Cancel" });
@@ -979,18 +1019,10 @@ function getPluginActions(pitem) {
   } else {
     a.push({ key: "enable-auto", label: "Enable auto-update" });
   }
-  if (pitem.type !== "npm") {
-    a.push({ key: "update", label: "Force rebuild & deploy" });
-    a.push({ key: "commits", label: "Select specific commit (Downgrade)" });
-  } else {
-    a.push({ key: "update-npm", label: "Update npm plugin" });
-  }
+  a.push({ key: "update", label: "Force rebuild & deploy" });
+  a.push({ key: "commits", label: "Select specific commit (Downgrade)" });
   a.push({ key: "disable-plugin", label: "Disable plugin" });
-  if (pitem.type !== "npm") {
-    a.push({ key: "uninstall-plugin", label: "Uninstall plugin" });
-  } else {
-    a.push({ key: "uninstall-npm", label: "Uninstall npm plugin" });
-  }
+  a.push({ key: "uninstall-plugin", label: "Uninstall plugin" });
   a.push({ key: "cancel", label: "Cancel" });
   return a;
 }
@@ -1158,7 +1190,7 @@ function buildProjects(pushBody, pushFoot, cols, barW) {
     pushBody("", false);
 
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot("  " + GRAY + "Enter" + RST + " Select  " + GRAY + "Q" + RST + " Quit  " + GRAY + "U" + RST + " Unhide all");
+    pushFoot(hints([["Enter", "Select"], ["U", "Unhide all"], ["Q", "Quit"]]));
     return;
   }
 
@@ -1197,19 +1229,11 @@ function buildProjects(pushBody, pushFoot, cols, barW) {
     var maxInput = Math.max(10, cols - 15 - inputLabel.length);
     var displayInput = inputBuf.length > maxInput ? "…" + inputBuf.substring(inputBuf.length - maxInput + 1) : inputBuf;
     pushFoot("  " + CYAN + inputLabel + RST + displayInput + BOLD + "|" + RST);
-    pushFoot("  " + DIM + "Enter" + RST + " Confirm  " + DIM + "Esc" + RST + " Cancel" + RST);
+    pushFoot(hints([["Enter", "Confirm"], ["Esc", "Cancel"]]));
   } else if (mode === "list") {
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Select  " +
-      DIM + "P" + RST + " Pin  " +
-      DIM + "H" + RST + " Hide  " +
-      DIM + "O" + RST + " Open  " +
-      DIM + "C" + RST + " Custom  " +
-      DIM + "Q" + RST + " Quit" + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["P", "Pin"], ["H", "Hide"], ["O", "Open"], ["C", "Custom"], ["Q", "Quit"]]));
   } else {
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Confirm  " +
-      DIM + "Esc" + RST + " Back" + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
   }
 }
 
@@ -1228,19 +1252,6 @@ function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
     if (sel) {
       var subInfo = GRAY + "     managed via npm (opencode.json)" + RST;
       pushBody("  " + subInfo, isSelected);
-    }
-    if (sel && mode === "pactions") {
-      pushBody("", isSelected);
-      var npmActs = getPluginActions(pitem);
-      for (var k = 0; k < npmActs.length; k++) {
-        var na = npmActs[k];
-        if (k === pacursor) {
-          pushBody("    " + GREEN + "  > " + BOLD + na.label + RST, isSelected);
-        } else {
-          pushBody("    " + GRAY + "    " + na.label + RST, isSelected);
-        }
-      }
-      pushBody("", isSelected);
     }
     return;
   }
@@ -1275,20 +1286,6 @@ function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
     pushBody("  " + subInfo, isSelected);
   }
 
-  if (sel && mode === "pactions") {
-    pushBody("", isSelected);
-    var acts = getPluginActions(pitem);
-    for (var j = 0; j < acts.length; j++) {
-      var a = acts[j];
-      var aSel = j === pacursor;
-      if (aSel) {
-        pushBody("    " + GREEN + "  > " + BOLD + a.label + RST, isSelected);
-      } else {
-        pushBody("    " + GRAY + "    " + a.label + RST, isSelected);
-      }
-    }
-    pushBody("", isSelected);
-  }
 }
 
 function buildPlugins(pushBody, pushFoot, cols, barW) {
@@ -1341,9 +1338,31 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
       pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
     }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Checkout  " +
-      DIM + "Esc" + RST + " Cancel" + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Checkout"], ["Esc", "Cancel"]]));
+    return;
+  }
+
+  // actions render as their own page, matching the marketplace menus
+  if (mode === "pactions" && pluginItems.length > 0 && pluginItems[pcursor]) {
+    var ppitem = pluginItems[pcursor];
+    pushBody("  " + MAGENTA + "#" + GRAY + " " + trunc(ppitem.name, cols - 6) + RST, false);
+    var pinfo = ppitem.type === "npm"
+      ? ("npm  " + (ppitem.version ? "v" + ppitem.version : "not installed"))
+      : trunc(ppitem.subject || ppitem.url || "", cols - 6);
+    if (pinfo) pushBody("  " + GRAY + pinfo + RST, false);
+    pushBody("", false);
+    var pacts = getPluginActions(ppitem);
+    for (var pj = 0; pj < pacts.length; pj++) {
+      if (pj === pacursor) {
+        pushBody("    " + GREEN + "  > " + BOLD + pacts[pj].label + RST, true);
+      } else {
+        pushBody("    " + GRAY + "    " + pacts[pj].label + RST, false);
+      }
+    }
+    pushBody("", false);
+    if (message) pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
+    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
     return;
   }
 
@@ -1394,9 +1413,7 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
         }
         pushBody("", false);
         pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-        pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-          DIM + "Enter" + RST + " Confirm  " +
-          DIM + "Esc" + RST + " Back" + RST);
+        pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
         return;
       }
     }
@@ -1413,22 +1430,21 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
       var starRaw = mitem.stars != null ? " ★" + mitem.stars : "";
       var starVis = starRaw.length;
       var mkNameW = Math.min(30, nameW);
-      var usedW = 2 + 3 + mkNameW + 2 + starVis;
+      var usedW = 2 + 3 + 2 + mkNameW + 2 + starVis;
       var descW = Math.max(10, cols - usedW - 2);
-      var descText = trunc(mitem.desc, descW);
+      var descText = trunc((mitem.desc || "").replace(/\r?\n/g, " "), descW);
       var descVis = stringWidth(descText);
-      var gapW = Math.max(1, cols - 2 - 3 - mkNameW - 2 - descVis - starVis);
+      var gapW = Math.max(1, cols - usedW - descVis);
       var starStr = starRaw ? (YELLOW + " ".repeat(gapW) + "★" + mitem.stars + RST) : "";
-      pushBody("  " + mbg + marrow + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
+      pushBody("  " + mbg + marrow + GRAY + "○" + RST + " " + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
+      if (msel && mitem.url) {
+        pushBody("  " + GRAY + "     " + trunc(mitem.url, cols - 10) + RST, msel);
+      }
     }
     pushBody("", false);
     if (message) { pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST); }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Select  " +
-      DIM + "/" + RST + " Search  " +
-      DIM + "Tab" + RST + " Switch  " +
-      DIM + "Q" + RST + " Quit" + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["I", "Install"], ["/", "Search"], ["R", "Refresh"], ["Tab", "Switch"], ["Q", "Quit"]]));
     return;
   }
 
@@ -1494,18 +1510,7 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
   }
   pushFoot("  " + GRAY + "-".repeat(barW) + RST);
 
-  if (mode === "pactions") {
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Confirm  " +
-      DIM + "Esc" + RST + " Back" + RST);
-  } else {
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Select  " +
-      DIM + "U" + RST + " Update  " +
-      DIM + "A" + RST + " Update all  " +
-      DIM + "D" + RST + " Disable  " +
-      DIM + "Q" + RST + " Quit" + RST);
-  }
+  pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["R", "Refresh"], ["U", "Update"], ["A", "Update all"], ["D", "Disable"], ["Q", "Quit"]]));
 }
 
 // Main render
@@ -1734,12 +1739,35 @@ function handlePluginKey(key) {
         if (marketplaceItems.length > 0) { mkMode = "actions"; mkAcursor = 0; }
       }
       else if (key === "/") { mode = "search"; return; }
+      else if (key === "r") {
+        catalogFetched = false;
+        fetchCatalogsAsync();
+        marketplaceItems = buildMarketplaceList();
+        flash("Refreshing catalog...");
+      }
+      else if (key === "i") {
+        if (marketplaceItems.length > 0) {
+          var quickItem = marketplaceItems[mkCursor];
+          flash("Installing " + (quickItem.name || quickItem.repoName) + "...");
+          render();
+          var quickErr = installMarketplacePlugin(quickItem);
+          if (quickErr) flash(quickErr);
+          else { flash("Installed! Restart to activate."); pluginItems = buildCombinedPluginList(); }
+          marketplaceItems = buildMarketplaceList();
+          if (mkCursor >= marketplaceItems.length) mkCursor = Math.max(0, marketplaceItems.length - 1);
+        }
+      }
     } else if (pluginSubPage === "installed") {
       if (key === "up" || key === "w") { pcursor = Math.max(0, pcursor - 1); }
       else if (key === "down" || key === "s") { pcursor = Math.min(pluginItems.length - 1, pcursor + 1); }
       else if (key === "enter" || key === "space") {
         if (pluginItems.length > 0) { mode = "pactions"; pacursor = 0; }
-      } else if (key === "f") {
+      }
+      else if (key === "r") {
+        pluginItems = buildCombinedPluginList();
+        flash("Refreshed.");
+      }
+      else if (key === "f") {
         flash("Fetching remotes...");
         render();
         fetchPluginRemotes(pluginItems);
@@ -2117,9 +2145,7 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
     }
     pushBody("", false);
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Confirm  " +
-      DIM + "Esc" + RST + " Back" + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
     return;
   }
 
@@ -2154,11 +2180,7 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
       pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
     }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Actions  " +
-      DIM + "X" + RST + " Uninstall  " +
-      DIM + "Tab" + RST + " Switch  " +
-      DIM + "Q" + RST + " Quit" + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["X", "Uninstall"], ["R", "Refresh"], ["Tab", "Switch"], ["Q", "Quit"]]));
   } else {
     // Marketplace
     mcpItems = buildMcpList("All");
@@ -2190,11 +2212,7 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
       pushFoot("  " + GREEN + "  " + trunc(message, cols - 5) + RST);
     }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot("  " + DIM + "^v" + RST + "/" + DIM + "WS" + RST + " Move  " +
-      DIM + "Enter" + RST + " Select  " +
-      DIM + "I" + RST + " Install  " +
-      DIM + "Tab" + RST + " Switch  " +
-      DIM + "Q" + RST + " Quit" + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["I", "Install"], ["/", "Search"], ["R", "Refresh"], ["Tab", "Switch"], ["Q", "Quit"]]));
   }
 }
 
@@ -2269,6 +2287,11 @@ function handleMcpKey(key) {
         flash(confirmLabel);
         mode = "confirm";
       }
+    }
+    else if (key === "r") {
+      catalogFetched = false;
+      mcpItems = buildMcpList("All");
+      flash("Refreshing catalog...");
     }
     else if (key === "q" || key === "escape") { cleanup(); process.exit(1); }
   } else if (mcpMode === "actions") {
@@ -2463,7 +2486,8 @@ process.stdin.on("data", function(buf) {
         if (!ocData.plugin.includes("plugin-updater")) ocData.plugin.unshift("plugin-updater");
         fs.writeFileSync(ocPath, JSON.stringify(ocData, null, 2), "utf-8");
       } catch(e) {
-        console.error("Failed to install updater:", e.message);
+        tuiLog("Failed to install updater: " + e.message);
+        flash("Failed to install updater: " + e.message);
         setTimeout(function(){}, 2000);
       }
       globalKeyHandler = null;
