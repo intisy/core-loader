@@ -8,6 +8,10 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
 
+// plugin-updater runs its full update sequence on import and logs to the
+// console; library mode limits it to the API so nothing prints over the TUI
+process.env.PLUGIN_UPDATER_LIBRARY_MODE = "1";
+
 var HOME = homedir();
 var APP_NAME = process.env.HUB_APP_NAME || "OpenCode";
 var CLI_CMD = process.env.HUB_CLI_CMD || "opencode";
@@ -100,30 +104,30 @@ global.OpenCodeAPI = {
   }
 };
 
+var UPDATER_MODULE;
 function getUpdater() {
+  if (UPDATER_MODULE !== undefined) return UPDATER_MODULE;
   const fs = require('fs');
   const path = require('path');
-  // Try file-based path first (git-installed updater)
   const updaterCandidates = [
     path.join(PLUGINS_DIR, "plugin-updater", "index.js"),
     path.join(CONFIG_DIR, "node_modules", "plugin-updater"),
-    // opencode installs npm plugins into its package cache
     path.join(require('os').homedir(), ".cache", "opencode", "packages", "plugin-updater@latest", "node_modules", "plugin-updater"),
   ];
   const updaterPath = updaterCandidates.find(function(p) { return fs.existsSync(p); });
   if (updaterPath) {
     try {
-      delete require.cache[require.resolve(updaterPath)];
-      return require(updaterPath);
+      UPDATER_MODULE = require(updaterPath);
+      return UPDATER_MODULE;
     } catch(e) {
       tuiLog("Failed to load updater plugin from " + updaterPath + ": " + e);
     }
   }
-  // Fallback: npm-installed updater (resolved via node module resolution)
   try {
-    delete require.cache[require.resolve("plugin-updater")];
-    return require("plugin-updater");
-  } catch { /* not installed via npm either */ }
+    UPDATER_MODULE = require("plugin-updater");
+    return UPDATER_MODULE;
+  } catch {}
+  UPDATER_MODULE = null;
   return null;
 }
 
