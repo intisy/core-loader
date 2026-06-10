@@ -91,6 +91,8 @@ function getUpdater() {
   const updaterCandidates = [
     path.join(PLUGINS_DIR, "plugin-updater", "index.js"),
     path.join(CONFIG_DIR, "node_modules", "plugin-updater"),
+    // opencode installs npm plugins into its package cache
+    path.join(require('os').homedir(), ".cache", "opencode", "packages", "plugin-updater@latest", "node_modules", "plugin-updater"),
   ];
   const updaterPath = updaterCandidates.find(function(p) { return fs.existsSync(p); });
   if (updaterPath) {
@@ -140,13 +142,28 @@ function loadNpmPlugins() {
         var name = p.replace(/@[^@\/]+$/, "") || p;
         var version = "";
         try {
-          var roots = [CACHE_PKG_DIR, join(CONFIG_DIR, "node_modules"), getNpmGlobalRoot()];
-          for (var root of roots) {
-            if (!root) continue;
-            var pkgPath = join(root, name, "package.json");
-            if (existsSync(pkgPath)) {
-              version = JSON.parse(readFileSync(pkgPath, "utf-8")).version || "";
-              break;
+          // opencode installs npm plugins into ~/.cache/opencode/packages/<name>@<spec>/
+          var pkgCache = join(homedir(), ".cache", "opencode", "packages");
+          if (existsSync(pkgCache)) {
+            var cacheEntries = require("fs").readdirSync(pkgCache);
+            for (var entry of cacheEntries) {
+              if (entry !== name && entry.indexOf(name + "@") !== 0) continue;
+              var cachedPkg = join(pkgCache, entry, "node_modules", name, "package.json");
+              if (existsSync(cachedPkg)) {
+                version = JSON.parse(readFileSync(cachedPkg, "utf-8")).version || "";
+                break;
+              }
+            }
+          }
+          if (!version) {
+            var roots = [CACHE_PKG_DIR, join(CONFIG_DIR, "node_modules"), getNpmGlobalRoot()];
+            for (var root of roots) {
+              if (!root) continue;
+              var pkgPath = join(root, name, "package.json");
+              if (existsSync(pkgPath)) {
+                version = JSON.parse(readFileSync(pkgPath, "utf-8")).version || "";
+                break;
+              }
             }
           }
         } catch {}
@@ -445,7 +462,7 @@ function buildPluginList() {
     var folderName = getFolderName(p);
     var dir = join(REPOS_DIR, folderName);
     var installed = existsSync(dir);
-    var deployed = (!p.pluginFile && !p.output) ? true : existsSync(join(PLUGINS_DIR, (p.pluginFile || "plugin.js")));
+    var deployed = existsSync(join(PLUGINS_DIR, (p.pluginFile || p.name + ".js")));
     var localHead = "";
     var remoteHead = "";
     var subject = "";
@@ -1784,7 +1801,7 @@ function handlePluginKey(key) {
             var plugins = loadPlugins();
             var match = plugins.find(function(r) { return r.name === p.name; });
             if (match) { match.enabled = false; savePlugins(plugins); }
-            var deployedPath = join(PLUGINS_DIR, (p.pluginFile || "plugin.js"));
+            var deployedPath = join(PLUGINS_DIR, (p.pluginFile || p.name + ".js"));
             if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
           }
           pluginItems = buildCombinedPluginList();
@@ -1834,7 +1851,7 @@ function handlePluginKey(key) {
         var match = plugins.find(function(r) { return r.name === pitem.name; });
         if (match) { match.enabled = false; } else { plugins.push({ name: pitem.name, enabled: false }); }
         savePlugins(plugins);
-        var deployedPath = join(PLUGINS_DIR, pitem.pluginFile);
+        var deployedPath = join(PLUGINS_DIR, (pitem.pluginFile || pitem.name + ".js"));
         if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
         pluginItems = buildCombinedPluginList();
         if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
@@ -1914,7 +1931,7 @@ function handlePluginKey(key) {
           updater.uninstall(cpitem);
         } else {
           var cdir = join(REPOS_DIR, cpitem.folderName);
-          var cdeployed = join(PLUGINS_DIR, cpitem.pluginFile || "plugin.js");
+          var cdeployed = join(PLUGINS_DIR, (cpitem.pluginFile || cpitem.name + ".js"));
           if (existsSync(cdir)) { try { var rmS = require("fs").rmSync; if (rmS) rmS(cdir, {recursive:true,force:true}); } catch(e){} }
           if (existsSync(cdeployed)) { try { unlinkSync(cdeployed); } catch(e){} }
         }
@@ -2192,7 +2209,7 @@ function handleConfirmKey(key) {
       plugins = plugins.filter(function(r) { return r.name !== pitem.name; });
       savePlugins(plugins);
       // Delete deployed file
-      var deployedPath = join(PLUGINS_DIR, (pitem.pluginFile || "plugin.js"));
+      var deployedPath = join(PLUGINS_DIR, (pitem.pluginFile || pitem.name + ".js"));
       if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
       // Delete repo folder
       var repoDir = join(REPOS_DIR, pitem.folderName);
