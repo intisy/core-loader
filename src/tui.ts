@@ -127,8 +127,6 @@ function getUpdater() {
   return null;
 }
 
-// Folder name helper: <creator>/<repo-name> to avoid collisions
-
 var NPM_GLOBAL_ROOT = null;
 function getNpmGlobalRoot() {
   if (NPM_GLOBAL_ROOT !== null) return NPM_GLOBAL_ROOT;
@@ -198,8 +196,6 @@ function getFolderName(plugin) {
   return plugin.name;
 }
 
-// Migration: move legacy config files into config/
-
 function migrateConfigs() {
   if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
   var legacyConfig = join(CONFIG_DIR, "oc-config.json");
@@ -213,8 +209,6 @@ function migrateConfigs() {
 }
 
 migrateConfigs();
-
-// Auto-update OpenCode itself
 
 function checkForUpdates() {
   try {
@@ -254,11 +248,8 @@ function checkForUpdates() {
 // deferred so the TUI renders immediately instead of waiting on version checks
 setTimeout(checkForUpdates, 1500);
 
-// Project launcher data
-
 function loadConfig() {
   try { if (existsSync(CONFIG_PATH)) return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")); } catch {}
-  // Legacy fallback
   var legacy = join(CONFIG_DIR, "oc-config.json");
   try { if (existsSync(legacy)) return JSON.parse(readFileSync(legacy, "utf-8")); } catch {}
   return { pinned: [], hidden: [] };
@@ -367,8 +358,6 @@ function trunc(s, len) {
   return res + "...";
 }
 
-// trunc: uses CJK-aware stringWidth version above (line 223)
-
 function buildList() {
   var cfg = loadConfig();
   var rows = queryProjects();
@@ -459,7 +448,6 @@ function loadCustomTabs() {
 
 function loadPlugins() {
   try { if (existsSync(PLUGINS_JSON)) return JSON.parse(readFileSync(PLUGINS_JSON, "utf-8")); } catch {}
-  // Legacy fallback
   var legacy = join(CONFIG_DIR, "plugins.json");
   try { if (existsSync(legacy)) return JSON.parse(readFileSync(legacy, "utf-8")); } catch {}
   return [];
@@ -896,10 +884,6 @@ function installMarketplacePlugin(entry) {
   return null;
 }
 
-// Provider logic removed - now handled by plugin extensions via registerTab()
-
-// State
-
 var items = buildList();
 
 function buildCombinedPluginList() {
@@ -963,9 +947,27 @@ var mkScrollOff = 0;
 var mkMode = "browse"; // "browse" | "actions"
 var mkAcursor = 0;
 var pluginSubPage = "installed"; // "installed" | "marketplace" | custom tab ids
-// Confirm state
 var confirmAction = null;
 var confirmLabel = "";
+var confirmCursor = 0;
+
+function buildConfirm(pushBody, pushFoot, cols, barW) {
+  pushBody("  " + MAGENTA + "#" + GRAY + " Confirm" + RST, false);
+  pushBody("", false);
+  pushBody("  " + BOLD + WHITE + trunc(confirmLabel, cols - 4) + RST, false);
+  pushBody("", false);
+  var opts = ["Yes", "Cancel"];
+  for (var i = 0; i < opts.length; i++) {
+    if (i === confirmCursor) {
+      pushBody("    " + GREEN + "  > " + BOLD + opts[i] + RST, true);
+    } else {
+      pushBody("    " + GRAY + "    " + opts[i] + RST, false);
+    }
+  }
+  pushBody("", false);
+  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+  pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Y", "Yes"], ["N/Esc", "Cancel"]]));
+}
 
 function flash(msg) {
   message = msg;
@@ -988,7 +990,6 @@ var SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "�
 var spinnerTick = 0;
 var spinnerTimer = null;
 function spinnerFrame() { return CYAN + SPINNER_FRAMES[spinnerTick % SPINNER_FRAMES.length] + RST; }
-// runs only while something is loading or a "..." message is on screen
 function updateSpinner() {
   var active = catalogPending > 0 || (message && message.indexOf("...") !== -1);
   if (active && !spinnerTimer) {
@@ -1399,7 +1400,6 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
     return;
   }
 
-  // actions render as their own page, matching the marketplace menus
   if (mode === "pactions" && pluginItems.length > 0 && pluginItems[pcursor]) {
     var ppitem = pluginItems[pcursor];
     pushBody("  " + MAGENTA + "#" + GRAY + " " + trunc(ppitem.name, cols - 6) + RST, false);
@@ -1433,7 +1433,6 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
     return;
   }
 
-  // Sub-page tab bar
   var tabInstalled = pluginSubPage === "installed" ? (BOLD + WHITE + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
   var tabMarketplace = pluginSubPage === "marketplace" ? (BOLD + WHITE + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
   var tabsLine = "  " + tabInstalled + "  " + tabMarketplace;
@@ -1559,7 +1558,6 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
   var lastWasGit = false;
   for (var i = 0; i < pluginItems.length; i++) {
     var pitem = pluginItems[i];
-    // Insert a section header when transitioning to npm plugins
     if (pitem.type === "npm" && (i === 0 || pluginItems[i - 1].type !== "npm")) {
       pushBody("", false);
       pushBody("  " + MAGENTA + "#" + GRAY + " npm plugins" + RST, false);
@@ -1609,9 +1607,10 @@ function render() {
   pushHead("  " + projTab + "  " + plugTab + "  " + mcpTab + "    " + DIM + "<- ->" + RST);
   pushHead("");
 
-  // 2. Build Body & Footer
   if (helpOpen) {
     buildHelp(pushBody, pushFoot, cols, barW);
+  } else if (mode === "confirm") {
+    buildConfirm(pushBody, pushFoot, cols, barW);
   } else if (page === "projects") {
     buildProjects(pushBody, pushFoot, cols, barW);
   } else if (page === "mcp") {
@@ -1671,12 +1670,13 @@ function render() {
   }
 
   // 4. Render to screen
-  _buf = E + "H"; 
+  // DEC 2026 synchronized output: the terminal paints the frame atomically
+  _buf = "\x1b[?2026h" + E + "H";
   for (var h of headLines) _buf += h + CLR + "\n";
   for (var b of bodyLines) _buf += b + CLR + "\n";
   for (var f of footLines) _buf += f + CLR + "\n";
-  _buf += E + "J";
-  
+  _buf += E + "J" + "\x1b[?2026l";
+
   process.stderr.write(_buf);
   _buf = "";
 }
@@ -1974,14 +1974,14 @@ function handlePluginKey(key) {
       }
       else if (action === "uninstall-npm") {
         confirmAction = { type: "uninstall-npm", target: pitem };
-        confirmLabel = "Uninstall " + pitem.name + " globally via npm? (y to confirm)";
-        flash(confirmLabel);
+        confirmLabel = "Uninstall npm plugin " + pitem.name + "? It is removed from opencode.json.";
+        confirmCursor = 0;
         mode = "confirm";
       }
       else if (action === "uninstall-plugin") {
         confirmAction = { type: "uninstall-plugin", target: pitem };
-        confirmLabel = "Uninstall " + pitem.name + "? This will delete the repo. (Y to confirm)";
-        flash(confirmLabel);
+        confirmLabel = "Uninstall " + pitem.name + "? This deletes its repo clone.";
+        confirmCursor = 0;
         mode = "confirm";
       }
             else if (action === "enable-plugin") {
@@ -2163,7 +2163,7 @@ function parseKey(buf) {
   if (buf[0] === 3) { cleanup(); process.exit(1); }
   if (buf[0] === 9) return "tab";
   var ch = String.fromCharCode(buf[0]).toLowerCase();
-  if ("wsadqpchofuximyr/?".indexOf(ch) !== -1) return ch;
+  if ("wsadqpchofuximynr/?".indexOf(ch) !== -1) return ch;
   return null;
 }
 
@@ -2219,7 +2219,6 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
     return;
   }
 
-  // Sub-tabs: Installed | Marketplace
   var mcpInstTab = mcpSubPage === "installed" ? (BOLD + WHITE + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
   var mcpMktTab = mcpSubPage === "marketplace" ? (BOLD + WHITE + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
   pushBody("  " + mcpInstTab + "  " + mcpMktTab + "    " + DIM + "Tab" + RST + " switch", false);
@@ -2289,7 +2288,11 @@ function buildMcp(pushBody, pushFoot, cols, barW) {
 // MCP key handling
 
 function handleConfirmKey(key) {
-  if (key === "y") {
+  if (key === "up" || key === "w") { confirmCursor = 0; return; }
+  if (key === "down" || key === "s") { confirmCursor = 1; return; }
+  var accepted = key === "y" || ((key === "enter" || key === "space") && confirmCursor === 0);
+  var rejected = key === "escape" || key === "q" || key === "n" || ((key === "enter" || key === "space") && confirmCursor === 1);
+  if (accepted) {
     if (confirmAction && confirmAction.type === "uninstall-plugin") {
       var pitem = confirmAction.target;
       // Remove from plugins.json
@@ -2307,6 +2310,16 @@ function handleConfirmKey(key) {
       pluginItems = buildCombinedPluginList();
       if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
       flash(pitem.name + " uninstalled.");
+    } else if (confirmAction && confirmAction.type === "uninstall-npm") {
+      var npmName = confirmAction.target.name || confirmAction.target;
+      var npmUpdater = getUpdater();
+      var npmErr = "updater not available";
+      if (npmUpdater && typeof npmUpdater.uninstallNpmPlugin === "function") {
+        npmErr = npmUpdater.uninstallNpmPlugin(npmName, CONFIG_DIR) || "";
+      }
+      pluginItems = buildCombinedPluginList();
+      if (pcursor >= pluginItems.length) pcursor = Math.max(0, pluginItems.length - 1);
+      flash(npmErr ? npmName + ": " + npmErr : npmName + " removed from opencode.json. Restart " + APP_NAME + " to unload.");
     } else if (confirmAction && confirmAction.type === "uninstall-mcp") {
       uninstallMcpServer(confirmAction.target);
       mcpItems = buildMcpList("All");
@@ -2315,10 +2328,12 @@ function handleConfirmKey(key) {
     }
     confirmAction = null;
     confirmLabel = "";
+    confirmCursor = 0;
     mode = "list";
-  } else if (key === "escape" || key === "q") {
+  } else if (rejected) {
     confirmAction = null;
     confirmLabel = "";
+    confirmCursor = 0;
     mode = "list";
     flash("Cancelled.");
   }
@@ -2353,8 +2368,8 @@ function handleMcpKey(key) {
       var instList = getInstalledMcpList();
       if (instList.length > 0 && mcpCursor < instList.length) {
         confirmAction = { type: "uninstall-mcp", target: instList[mcpCursor].name };
-        confirmLabel = "Remove " + instList[mcpCursor].name + "? (Y to confirm)";
-        flash(confirmLabel);
+        confirmLabel = "Remove MCP server " + instList[mcpCursor].name + "?";
+        confirmCursor = 0;
         mode = "confirm";
       }
     }
@@ -2380,8 +2395,8 @@ function handleMcpKey(key) {
         mcpMode = "catalog";
       } else if (action === "uninstall") {
         confirmAction = { type: "uninstall-mcp", target: mitem.name };
-        confirmLabel = "Remove " + mitem.name + "? (Y to confirm)";
-        flash(confirmLabel);
+        confirmLabel = "Remove MCP server " + mitem.name + "?";
+        confirmCursor = 0;
         mode = "confirm";
         mcpMode = "catalog";
       } else if (action === "configure") {
