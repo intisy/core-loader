@@ -845,7 +845,7 @@ function fetchCatalogsAsync() {
     for (var entry of missing) {
       (function(target) {
         catalogPending++;
-        exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/repos/' + target.full_name + '"', function(err, stdout) {
+        exec(curlCmd + ' -sL -H "User-Agent: OpenCode" "https://api.github.com/repos/' + target.full_name + '"', function(err, stdout) {
           if (!err && stdout) {
             try {
               var repo = JSON.parse(stdout);
