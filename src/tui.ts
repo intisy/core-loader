@@ -88,8 +88,12 @@ function getUpdater() {
   const fs = require('fs');
   const path = require('path');
   // Try file-based path first (git-installed updater)
-  const updaterPath = path.join(PLUGINS_DIR, "plugin-updater", "index.js");
-  if (fs.existsSync(updaterPath)) {
+  const updaterCandidates = [
+    path.join(PLUGINS_DIR, "plugin-updater", "index.js"),
+    path.join(CONFIG_DIR, "node_modules", "plugin-updater"),
+  ];
+  const updaterPath = updaterCandidates.find(function(p) { return fs.existsSync(p); });
+  if (updaterPath) {
     try {
       delete require.cache[require.resolve(updaterPath)];
       return require(updaterPath);
@@ -106,6 +110,14 @@ function getUpdater() {
 }
 
 // Folder name helper: <creator>/<repo-name> to avoid collisions
+
+var NPM_GLOBAL_ROOT = null;
+function getNpmGlobalRoot() {
+  if (NPM_GLOBAL_ROOT !== null) return NPM_GLOBAL_ROOT;
+  try { NPM_GLOBAL_ROOT = execSync("npm root -g", { timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); }
+  catch { NPM_GLOBAL_ROOT = ""; }
+  return NPM_GLOBAL_ROOT;
+}
 
 function loadNpmPlugins() {
   // Delegate to updater API when available; fall back to direct read
@@ -128,15 +140,14 @@ function loadNpmPlugins() {
         var name = p.replace(/@[^@\/]+$/, "") || p;
         var version = "";
         try {
-          var cachePkg = join(CACHE_PKG_DIR, name, "package.json");
-          var globalNpm = process.platform === "win32"
-            ? join(homedir(), "AppData", "Roaming", "npm", "node_modules")
-            : join("/usr", "lib", "node_modules");
-          var pkgPath = existsSync(cachePkg) ? cachePkg
-            : existsSync(join(CONFIG_DIR, "node_modules", name, "package.json")) ? join(CONFIG_DIR, "node_modules", name, "package.json")
-            : join(globalNpm, name, "package.json");
-          if (existsSync(pkgPath)) {
-            version = JSON.parse(readFileSync(pkgPath, "utf-8")).version || "";
+          var roots = [CACHE_PKG_DIR, join(CONFIG_DIR, "node_modules"), getNpmGlobalRoot()];
+          for (var root of roots) {
+            if (!root) continue;
+            var pkgPath = join(root, name, "package.json");
+            if (existsSync(pkgPath)) {
+              version = JSON.parse(readFileSync(pkgPath, "utf-8")).version || "";
+              break;
+            }
           }
         } catch {}
         return { name: name, version: version, installed: version !== "", raw: p };
@@ -146,7 +157,11 @@ function loadNpmPlugins() {
 
 function getFolderName(plugin) {
   var match = (plugin.url || "").match(/github\.com\/([^\/]+)\/([^\/\.]+)/);
-  if (match) return match[1] + "/" + plugin.name;
+  if (match) {
+    var nested = match[1] + "/" + plugin.name;
+    if (existsSync(join(REPOS_DIR, nested))) return nested;
+  }
+  // plugin-updater clones flat into repos/<name>
   return plugin.name;
 }
 
@@ -442,14 +457,11 @@ function buildPluginList() {
         localHead = gitText(["git", "rev-parse", "HEAD"], dir);
         subject = gitText(["git", "log", "-1", "--format=%s"], dir);
         var desc = gitText(["git", "describe", "--tags", "--always"], dir);
-        if (desc && desc.indexOf("-") !== -1) {
-          var tmatch = desc.match(/^(.*)-\d+-g([0-9a-f]+)$/);
-          if (tmatch) { latestTag = tmatch[2] + " (" + tmatch[1] + ")"; }
-          else { latestTag = desc; }
-        } else if (desc && /^v?\d/.test(desc)) {
-          latestTag = desc;
+        if (!desc || /^[0-9a-f]+$/.test(desc)) {
+          latestTag = ""; // no tags in repo — row falls back to the sha
         } else {
-          latestTag = "";
+          var tmatch = desc.match(/^(.*)-\d+-g[0-9a-f]+$/);
+          latestTag = tmatch ? tmatch[1] + " (" + localHead.substring(0, 7) + ")" : desc;
         }
       }
 
@@ -1110,6 +1122,14 @@ function buildProjectItem(pushBody, i, item, nameW, cols, isSelected) {
   }
 }
 
+function buildOpenHereItem(pushBody) {
+  var sel = cursor === items.length;
+  var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+  var bg = sel ? BG_SEL : "";
+  var nameStyle = sel ? (BOLD + WHITE) : DIM;
+  pushBody("  " + bg + arrow + nameStyle + "Open " + APP_NAME + " here" + RST + bg + "  " + GRAY + process.cwd() + RST, sel);
+}
+
 function buildProjects(pushBody, pushFoot, cols, barW) {
   var nameW = Math.min(28, Math.max(16, cols - 36));
 
@@ -1117,9 +1137,11 @@ function buildProjects(pushBody, pushFoot, cols, barW) {
     pushBody("  " + GRAY + "No projects found." + RST, false);
     pushBody("  " + GRAY + "Use " + APP_NAME + " in a directory first, then come back." + RST, false);
     pushBody("", false);
-    
+    buildOpenHereItem(pushBody);
+    pushBody("", false);
+
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot("  " + GRAY + "Q" + RST + " Quit  " + GRAY + "U" + RST + " Unhide all");
+    pushFoot("  " + GRAY + "Enter" + RST + " Select  " + GRAY + "Q" + RST + " Quit  " + GRAY + "U" + RST + " Unhide all");
     return;
   }
 
@@ -1144,6 +1166,8 @@ function buildProjects(pushBody, pushFoot, cols, barW) {
     }
   }
 
+  pushBody("", false);
+  buildOpenHereItem(pushBody);
   pushBody("", false);
 
   if (message) {
@@ -1187,6 +1211,19 @@ function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
     if (sel) {
       var subInfo = GRAY + "     managed via npm (opencode.json)" + RST;
       pushBody("  " + subInfo, isSelected);
+    }
+    if (sel && mode === "pactions") {
+      pushBody("", isSelected);
+      var npmActs = getPluginActions(pitem);
+      for (var k = 0; k < npmActs.length; k++) {
+        var na = npmActs[k];
+        if (k === pacursor) {
+          pushBody("    " + GREEN + "  > " + BOLD + na.label + RST, isSelected);
+        } else {
+          pushBody("    " + GRAY + "    " + na.label + RST, isSelected);
+        }
+      }
+      pushBody("", isSelected);
     }
     return;
   }
@@ -1580,13 +1617,17 @@ function handleKey(key) {
 function handleProjectKey(key) {
   if (mode === "list") {
     if (key === "up" || key === "w") { cursor = Math.max(0, cursor - 1); }
-    else if (key === "down" || key === "s") { cursor = Math.min(items.length - 1, cursor + 1); }
+    else if (key === "down" || key === "s") { cursor = Math.min(items.length, cursor + 1); }
     else if (key === "enter" || key === "space") {
-      if (items.length > 0) { mode = "actions"; acursor = 0; }
+      if (cursor === items.length) { cleanup(); process.exit(42); }
+      else if (items.length > 0) { mode = "actions"; acursor = 0; }
     }
-    else if (key === "o") { if (items.length > 0) openProject(items[cursor]); }
-    else if (key === "p") { if (items.length > 0) togglePin(cursor); }
-    else if (key === "h") { if (items.length > 0) hideItem(cursor); }
+    else if (key === "o") {
+      if (cursor === items.length) { cleanup(); process.exit(42); }
+      else if (items.length > 0) openProject(items[cursor]);
+    }
+    else if (key === "p") { if (cursor < items.length) togglePin(cursor); }
+    else if (key === "h") { if (cursor < items.length) hideItem(cursor); }
     else if (key === "u") { unhideAll(); }
     else if (key === "c") { mode = "input"; inputBuf = ""; }
     else if (key === "q" || key === "escape") { cleanup(); process.exit(1); }
