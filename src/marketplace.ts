@@ -1,0 +1,298 @@
+// @ts-nocheck
+// Plugin marketplace: async catalog fetches (GitHub topics, npm, awesome list),
+// on-disk catalog cache, list building, and one-shot plugin install via git.
+
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
+import { join, dirname } from "path";
+import { exec, execSync } from "child_process";
+import { CATALOG_CACHE_PATH, CACHE_DIR, MCP_CATALOG, APP_NAME, REPOS_DIR, tuiLog } from "./env.js";
+import { S } from "./state.js";
+import { loadPlugins, savePlugins } from "./config.js";
+import { scheduleRender } from "./views/common.js";
+import { buildMcpList } from "./mcp.js";
+
+export function invalidateCatalogCache() {
+  try { unlinkSync(CATALOG_CACHE_PATH); } catch {}
+}
+
+export function loadCatalogCache() {
+  try {
+    if (!existsSync(CATALOG_CACHE_PATH)) return false;
+    var cached = JSON.parse(readFileSync(CATALOG_CACHE_PATH, "utf-8"));
+    if (!cached || Date.now() - cached.time > 6 * 3600000) return false;
+    if (!Array.isArray(cached.marketplace) || cached.marketplace.length === 0) return false;
+    for (var ce of cached.marketplace) S.MARKETPLACE_CATALOG.push(ce);
+    for (var me of (cached.mcp || [])) {
+      if (!MCP_CATALOG.find(function(x) { return x.name === me.name; })) MCP_CATALOG.push(me);
+    }
+    tuiLog("marketplace catalog loaded from cache");
+    return true;
+  } catch { return false; }
+}
+
+export function fetchCatalogsAsync() {
+  if (S.catalogFetched) return;
+  S.catalogFetched = true;
+  if (loadCatalogCache()) return;
+
+  var curlCmd = process.platform === "win32" ? "curl.exe" : "curl";
+  var enrichedOnce = false;
+
+  function saveCatalog() {
+    try {
+      if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+      writeFileSync(CATALOG_CACHE_PATH, JSON.stringify({ time: Date.now(), marketplace: S.MARKETPLACE_CATALOG, mcp: MCP_CATALOG }));
+      tuiLog("marketplace catalog cached (" + S.MARKETPLACE_CATALOG.length + " plugins)");
+    } catch {}
+  }
+
+  // search-API star matching breaks on renamed repos and rate limits; per-repo
+  // lookups use the larger core API budget and follow renames, then the result
+  // is cached on disk so the budget is spent once, not per TUI open
+  function enrichCuratedStars() {
+    var missing = S.MARKETPLACE_CATALOG.filter(function(e) { return e.stars == null && e.full_name; }).slice(0, 40);
+    tuiLog("enriching stars for " + missing.length + " catalog entries");
+    for (var entry of missing) {
+      (function(target) {
+        S.catalogPending++;
+        exec(curlCmd + ' -sL -H "User-Agent: OpenCode" "https://api.github.com/repos/' + target.full_name + '"', function(err, stdout) {
+          if (!err && stdout) {
+            try {
+              var repo = JSON.parse(stdout);
+              if (repo && typeof repo.stargazers_count === "number") {
+                target.stars = repo.stargazers_count;
+                if (!target.desc && repo.description) target.desc = repo.description;
+              } else if (repo && repo.message) {
+                tuiLog("github repos api (" + target.full_name + "): " + repo.message);
+              }
+            } catch {}
+          }
+          refreshMarketplace();
+          fetchDone();
+        });
+      })(entry);
+    }
+  }
+
+  function fetchDone() {
+    S.catalogPending = Math.max(0, S.catalogPending - 1);
+    if (S.catalogPending > 0) return;
+    scheduleRender();
+    if (!enrichedOnce) {
+      enrichedOnce = true;
+      enrichCuratedStars();
+      if (S.catalogPending > 0) return;
+    }
+    saveCatalog();
+  }
+  function searchGH(query, catalog, pageNum) {
+    S.catalogPending++;
+    exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=' + query + '&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
+      fetchDone();
+      if (!err && stdout) {
+        try {
+          var json = JSON.parse(stdout);
+          if (json.message) tuiLog("github search: " + json.message);
+          if (json.items) {
+            for (var i = 0; i < json.items.length; i++) {
+              var it = json.items[i];
+              var cleanName = it.name.replace(/^claude-|^opencode-/, "");
+              var exists = catalog.find(function(m) { return m.name === (catalog === S.MARKETPLACE_CATALOG ? cleanName : it.name); });
+              if (!exists) {
+                var newItem = {
+                  name: catalog === S.MARKETPLACE_CATALOG ? cleanName : it.name,
+                  desc: it.description || "",
+                  category: "Community",
+                  stars: it.stargazers_count
+                };
+                if (catalog === S.MARKETPLACE_CATALOG) {
+                  newItem.author = it.owner.login;
+                  newItem.repoName = it.name;
+                  newItem.full_name = it.full_name;
+                  newItem.url = "https://github.com/" + it.full_name + ".git";
+                } else {
+                  newItem.command = "npx";
+                  newItem.args = ["-y", it.full_name];
+                  newItem.env = {};
+                }
+                catalog.push(newItem);
+              } else {
+                exists.stars = it.stargazers_count;
+              }
+            }
+            catalog.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
+            if (catalog === S.MARKETPLACE_CATALOG && S.pluginSubPage === "marketplace") {
+               S.marketplaceItems = buildMarketplaceList();
+               scheduleRender();
+            } else if (catalog === MCP_CATALOG && S.page === "mcp" && S.mcpSubPage === "marketplace") {
+               S.mcpItems = buildMcpList("All");
+               scheduleRender();
+            }
+          }
+        } catch(e) {}
+      }
+    });
+  }
+
+  function searchNpm(keyword) {
+    S.catalogPending++;
+    exec(curlCmd + ' -s "https://registry.npmjs.org/-/v1/search?text=keywords:' + keyword + '&size=100"', function(err, stdout) {
+      fetchDone();
+      if (err || !stdout) return;
+      try {
+        var json = JSON.parse(stdout);
+        for (var obj of (json.objects || [])) {
+          var pkg = obj.package || {};
+          var repoUrl = ((pkg.links && pkg.links.repository) || "").replace(/^git\+/, "");
+          if (!repoUrl) continue;
+          var repoMatch = repoUrl.match(/([^\/]+)\/([^\/]+?)(\.git)?$/);
+          if (!repoMatch) continue;
+          var author = repoMatch[1];
+          var repoName = repoMatch[2];
+          var shortName = pkg.name.replace(/^@[^\/]+\//, "");
+          var exists = S.MARKETPLACE_CATALOG.find(function(e) {
+            return e.name === shortName || (e.repoName || e.name) === repoName;
+          });
+          if (exists) continue;
+          S.MARKETPLACE_CATALOG.push({
+            name: shortName,
+            desc: pkg.description || "",
+            category: "Community",
+            author: author,
+            repoName: repoName,
+            full_name: author + "/" + repoName,
+            url: repoUrl.endsWith(".git") ? repoUrl : repoUrl + ".git",
+          });
+        }
+        S.MARKETPLACE_CATALOG.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
+        if (S.pluginSubPage === "marketplace") {
+          S.marketplaceItems = buildMarketplaceList();
+          scheduleRender();
+        }
+      } catch(e) {}
+    });
+  }
+
+  // the awesome-opencode list is the curated membership oracle: the fuzzy
+  // starred search may only contribute repos that the community list contains,
+  // which keeps popular plugins in and look-alike repos out
+  var awesomeSet = null;
+  function refreshMarketplace() {
+    S.MARKETPLACE_CATALOG.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
+    if (S.pluginSubPage === "marketplace") {
+      S.marketplaceItems = buildMarketplaceList();
+      scheduleRender();
+    }
+  }
+
+  function catalogHas(fullName) {
+    var key = fullName.toLowerCase();
+    return S.MARKETPLACE_CATALOG.find(function(e) { return (e.full_name || "").toLowerCase() === key; });
+  }
+
+  function searchPopular(pageNum) {
+    S.catalogPending++;
+    exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=opencode&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
+      fetchDone();
+      if (err || !stdout) return;
+      try {
+        var json = JSON.parse(stdout);
+        if (json.message) tuiLog("github search: " + json.message);
+        for (var it of (json.items || [])) {
+          var existing = catalogHas(it.full_name || "");
+          if (existing) {
+            existing.stars = it.stargazers_count;
+            if (!existing.desc) existing.desc = it.description || "";
+            continue;
+          }
+          if (!awesomeSet || !awesomeSet[(it.full_name || "").toLowerCase()]) continue;
+          S.MARKETPLACE_CATALOG.push({
+            name: it.name, desc: it.description || "", category: "Community",
+            stars: it.stargazers_count, author: it.owner.login, repoName: it.name,
+            full_name: it.full_name, url: "https://github.com/" + it.full_name + ".git",
+          });
+        }
+        refreshMarketplace();
+      } catch(e) {}
+    });
+  }
+
+  function fetchAwesomeList() {
+    S.catalogPending++;
+    exec(curlCmd + ' -s "https://raw.githubusercontent.com/awesome-opencode/awesome-opencode/main/README.md"', { maxBuffer: 4 * 1024 * 1024 }, function(err, stdout) {
+      fetchDone();
+      if (!err && stdout) {
+        try {
+          var section = stdout;
+          var pStart = stdout.indexOf("PLUGINS</strong>");
+          var pEnd = stdout.indexOf("THEMES</strong>");
+          if (pStart !== -1 && pEnd > pStart) section = stdout.substring(pStart, pEnd);
+          awesomeSet = {};
+          var badgeRe = /badgen\.net\/github\/stars\/([^"\/\s]+)\/([^"\/\s]+)/g;
+          var m;
+          while ((m = badgeRe.exec(section))) {
+            var author = m[1];
+            var repoName = m[2];
+            awesomeSet[(author + "/" + repoName).toLowerCase()] = true;
+            if (catalogHas(author + "/" + repoName)) continue;
+            var descMatch = section.substring(m.index, m.index + 400).match(/<i>([^<]*)<\/i>/);
+            S.MARKETPLACE_CATALOG.push({
+              name: repoName, desc: descMatch ? descMatch[1] : "", category: "Curated",
+              author: author, repoName: repoName, full_name: author + "/" + repoName,
+              url: "https://github.com/" + author + "/" + repoName + ".git",
+            });
+          }
+          refreshMarketplace();
+        } catch(e) {}
+      }
+      // the broad starred search supplies star counts for the curated entries,
+      // whose badge images carry no numbers; membership keeps it precise
+      searchPopular(1);
+      searchPopular(2);
+    });
+  }
+
+  var pluginTopic = APP_NAME === "Claude Code" ? "claude-code-plugin" : "opencode-plugin";
+  searchGH("topic:" + pluginTopic, S.MARKETPLACE_CATALOG, 1);
+  searchGH("topic:" + pluginTopic, S.MARKETPLACE_CATALOG, 2);
+  searchNpm(pluginTopic);
+  if (APP_NAME !== "Claude Code") fetchAwesomeList();
+  searchGH("topic:mcp-server", MCP_CATALOG, 1);
+  searchGH("topic:mcp-server", MCP_CATALOG, 2);
+}
+
+export function buildMarketplaceList() {
+  fetchCatalogsAsync();
+  var installed = loadPlugins();
+  var installedNames = installed.map(function(p) { return p.name; });
+  var res = S.MARKETPLACE_CATALOG.map(function(m) {
+    var repoName = m.repoName || m.name;
+    var isInstalled = installedNames.indexOf(m.name) !== -1 || installedNames.indexOf(repoName) !== -1;
+    return Object.assign({}, m, { installed: isInstalled });
+  });
+  if (S.inputBuf) {
+    var q = S.inputBuf.toLowerCase();
+    res = res.filter(function(m) { return (m.name||'').toLowerCase().indexOf(q) !== -1 || (m.desc||'').toLowerCase().indexOf(q) !== -1; });
+  }
+  return res;
+}
+
+export function installMarketplacePlugin(entry) {
+  var repoName = entry.repoName || entry.name;
+  var url = entry.url;
+  var plugins = loadPlugins();
+  plugins.push({ name: repoName, url: url, autoUpdate: true, enabled: true });
+  savePlugins(plugins);
+  var folderName = entry.full_name || (entry.author + "/" + repoName);
+  var dir = join(REPOS_DIR, folderName);
+  if (!existsSync(dir)) {
+    var parentDir = dirname(dir);
+    if (!existsSync(parentDir)) try { mkdirSync(parentDir, { recursive: true }); } catch {}
+    try {
+      execSync("git clone --recurse-submodules " + url + " " + folderName, { cwd: REPOS_DIR, timeout: 60000, stdio: "ignore" });
+      return null;
+    } catch (e) { return "Clone failed: " + (e.message || e); }
+  }
+  return null;
+}
+

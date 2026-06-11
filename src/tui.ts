@@ -10,9 +10,15 @@ import { homedir } from "os";
 import { E, RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, BLUE, MAGENTA, BG_SEL, CLR, stringWidth, pad, trunc, timeAgo } from "./format.js";
 import { S } from "./state.js";
 import { HOME, APP_NAME, CLI_CMD, NPM_PKG, CONFIG_DIR, CACHE_PKG_DIR, DB_PATH, CONFIG_FOLDER, CACHE_DIR, CONFIG_PATH, UPDATE_CHECK_PATH, PLUGINS_JSON, REPOS_DIR, PLUGINS_DIR, MCP_CONFIG_PATH, CATALOG_CACHE_PATH, tuiLog, MCP_CATALOG, SPINNER_FRAMES, HELP_BINDINGS } from "./env.js";
-import { hideCur, showCur } from "./out.js";
+import { hideCur, showCur, cleanup } from "./out.js";
 import { getUpdater, getUpdaterVersion, setupPlugin, loadNpmPlugins, getFolderName } from "./updater.js";
 import { loadConfig, saveConfig, migrateConfigs, loadPlugins, savePlugins, loadMcpConfig, saveMcpConfig } from "./config.js";
+import { flash, scheduleRender, hints, messageLine, spinnerFrame, updateSpinner, buildConfirm, buildHelp } from "./views/common.js";
+import { loadProviders } from "./providers.js";
+import { getInstalledMcpList, buildMcpList, installMcpServer, uninstallMcpServer, getMcpActions } from "./mcp.js";
+import { invalidateCatalogCache, fetchCatalogsAsync, buildMarketplaceList, installMarketplacePlugin } from "./marketplace.js";
+import { fetchPluginRemotes, buildCombinedPluginList, getPluginActions } from "./plugins.js";
+import { shortPath, buildList, getActions, outputDir, openProject, togglePin, hideItem, unhideAll, changeProjectPath } from "./projects.js";
 
 global.OpenCodeAPI = {
   getReposDir: function() { return REPOS_DIR; },
@@ -121,96 +127,8 @@ function checkForUpdates() {
 setTimeout(checkForUpdates, 1500);
 
 
-function queryProjects() {
-  if (APP_NAME === "Claude Code") {
-    var historyPath = join(CONFIG_DIR, "history.jsonl");
-    if (!existsSync(historyPath)) return [];
-    try {
-      var lines = readFileSync(historyPath, "utf8").split("\n").filter(Boolean);
-      var projects = {};
-      for (var line of lines) {
-        try {
-          var parsed = JSON.parse(line);
-          if (parsed.project) {
-            if (!projects[parsed.project]) {
-              projects[parsed.project] = { last_used: 0, sessions: new Set() };
-            }
-            if (parsed.timestamp > projects[parsed.project].last_used) {
-              projects[parsed.project].last_used = parsed.timestamp;
-            }
-            if (parsed.sessionId) {
-              projects[parsed.project].sessions.add(parsed.sessionId);
-            }
-          }
-        } catch (e) {}
-      }
-      return Object.keys(projects).map(function(dir) {
-        return {
-          directory: dir,
-          last_used: projects[dir].last_used,
-          sessions: projects[dir].sessions.size
-        };
-      }).sort(function(a, b) { return b.last_used - a.last_used; }).slice(0, 30);
-    } catch (e) { return []; }
-  }
 
-  if (!existsSync(DB_PATH)) return [];
-  try {
-    var db = new Database(DB_PATH, { readonly: true });
-    var rows = db.query(
-      "SELECT directory, MAX(time_updated) as last_used, COUNT(*) as sessions " +
-      "FROM session WHERE parent_id IS NULL GROUP BY directory ORDER BY last_used DESC LIMIT 30"
-    ).all();
-    db.close();
-    return rows;
-  } catch (e) { return []; }
-}
 
-function shortPath(dir) {
-  var h = HOME.replace(/\\/g, "/");
-  var d = dir.replace(/\\/g, "/");
-  if (d.startsWith(h)) d = "~" + d.substring(h.length);
-  return d;
-}
-
-function buildList() {
-  var cfg = loadConfig();
-  var rows = queryProjects();
-  var list = [];
-
-  var pinnedItems = [];
-  for (var dir of cfg.pinned) {
-    var row = rows.find(function(r) { return r.directory === dir; });
-    if (cfg.hidden.indexOf(dir) !== -1) continue;
-    pinnedItems.push({
-      dir: dir,
-      name: dir.split(/[\\/]/).pop() || dir,
-      sessions: row ? row.sessions : 0,
-      lastUsed: row ? row.last_used : 0,
-      pinned: true
-    });
-  }
-  pinnedItems.sort(function(a, b) { return (b.lastUsed || 0) - (a.lastUsed || 0); });
-  for (var pi = 0; pi < pinnedItems.length; pi++) { list.push(pinnedItems[pi]); }
-
-  for (var i = 0; i < rows.length; i++) {
-    var r = rows[i];
-    if (cfg.pinned.indexOf(r.directory) !== -1) continue;
-    if (cfg.hidden.indexOf(r.directory) !== -1) continue;
-    list.push({
-      dir: r.directory,
-      name: r.directory.split(/[\\/]/).pop() || r.directory,
-      sessions: r.sessions,
-      lastUsed: r.last_used,
-      pinned: false
-    });
-  }
-  if (S.inputBuf) {
-    var q = S.inputBuf.toLowerCase();
-    list = list.filter(function(m) { return (m.name||"").toLowerCase().indexOf(q) !== -1 || (m.desc||"").toLowerCase().indexOf(q) !== -1; });
-  }
-  return list;
-}
 
 // Plugin data
 
@@ -262,73 +180,8 @@ function loadCustomTabs() {
 
 
 
-function gitText(args, cwd) {
-  try {
-    var out = execSync(args.join(" "), { cwd: cwd, encoding: "utf-8", timeout: 15000, stdio: ["ignore", "pipe", "ignore"] });
-    return out.trim();
-  } catch { return ""; }
-}
 
-function buildPluginList() {
-  var plugins = loadPlugins();
-  var list = [];
-  for (var p of plugins) {
-    var folderName = getFolderName(p);
-    var dir = join(REPOS_DIR, folderName);
-    var installed = existsSync(dir);
-    var deployed = existsSync(join(PLUGINS_DIR, (p.pluginFile || p.name + ".js")));
-    var localHead = "";
-    var remoteHead = "";
-    var subject = "";
-    var updateAvail = false;
-    var latestTag = "";
-    var enabled = p.enabled !== false;
 
-      if (installed) {
-        localHead = gitText(["git", "rev-parse", "HEAD"], dir);
-        subject = gitText(["git", "log", "-1", "--format=%s"], dir);
-        var desc = gitText(["git", "describe", "--tags", "--always"], dir);
-        if (!desc || /^[0-9a-f]+$/.test(desc)) {
-          latestTag = ""; // no tags in repo — row falls back to the sha
-        } else {
-          var tmatch = desc.match(/^(.*)-\d+-g[0-9a-f]+$/);
-          latestTag = tmatch ? tmatch[1] + " (" + localHead.substring(0, 7) + ")" : desc;
-        }
-      }
-
-    list.push({
-      name: p.name,
-      folderName: folderName,
-      url: p.url,
-      autoUpdate: p.autoUpdate !== false,
-      enabled: enabled,
-      installed: installed,
-      deployed: deployed,
-      localHead: localHead,
-      remoteHead: remoteHead,
-      latestTag: latestTag,
-      subject: subject,
-      updateAvail: updateAvail,
-      hasBuild: !!(p.build || p.bundle),
-      pluginFile: p.pluginFile,
-      _raw: p
-    });
-  }
-  return list;
-}
-
-function fetchPluginRemotes(pluginItems) {
-  for (var p of pluginItems) {
-    if (p.type === "npm" || !p.installed) continue;
-    var dir = join(REPOS_DIR, p.folderName);
-    gitText(["git", "fetch", "origin"], dir);
-    for (var ref of ["origin/HEAD", "origin/main", "origin/master"]) {
-      var h = gitText(["git", "rev-parse", ref], dir);
-      if (h) { p.remoteHead = h; break; }
-    }
-    p.updateAvail = !!(p.localHead && p.remoteHead && p.localHead !== p.remoteHead);
-  }
-}
 
 // runPluginUpdate removed - delegated to updater plugin
 
@@ -340,525 +193,25 @@ function fetchPluginRemotes(pluginItems) {
 
 
 
-function scanPluginEmbeddedMcps() {
-  var embedded = {};
-  var baseMcpNames = {};
 
-  function scanReposDir(reposDir) {
-    if (!existsSync(reposDir)) return;
-    try {
-      var authors = readdirSync(reposDir);
-      for (var author of authors) {
-        var authorDir = join(reposDir, author);
-        try {
-          var repos = readdirSync(authorDir);
-          for (var repo of repos) {
-            var candidates = [
-              join(authorDir, repo, ".mcp.json"),
-              join(authorDir, repo, "plugin", ".mcp.json")
-            ];
-            for (var mcpFile of candidates) {
-              if (existsSync(mcpFile)) {
-                try {
-                  var data = JSON.parse(readFileSync(mcpFile, "utf-8"));
-                  var servers = data.mcpServers || {};
-                  for (var sname of Object.keys(servers)) {
-                    var key = "plugin:" + repo.toLowerCase() + ":" + sname;
-                    if (!embedded[key]) {
-                      embedded[key] = Object.assign({ _pluginSource: repo }, servers[sname]);
-                      baseMcpNames[sname] = true;
-                    }
-                  }
-                } catch {}
-              }
-            }
-          }
-        } catch {}
-      }
-    } catch {}
-  }
 
-  function scanPluginCache(cacheDir) {
-    if (!existsSync(cacheDir)) return;
-    try {
-      var orgs = readdirSync(cacheDir);
-      for (var org of orgs) {
-        var orgDir = join(cacheDir, org);
-        try {
-          var names = readdirSync(orgDir);
-          for (var pname of names) {
-            var pnameDir = join(orgDir, pname);
-            try {
-              var versions = readdirSync(pnameDir);
-              versions.sort();
-              var latest = versions[versions.length - 1];
-              if (latest) {
-                var candidates = [
-                  join(pnameDir, latest, ".mcp.json"),
-                  join(pnameDir, latest, "plugin", ".mcp.json")
-                ];
-                for (var mcpFile of candidates) {
-                  if (existsSync(mcpFile)) {
-                    try {
-                      var data = JSON.parse(readFileSync(mcpFile, "utf-8"));
-                      var servers = data.mcpServers || {};
-                      for (var sname of Object.keys(servers)) {
-                        var key = "plugin:" + pname.toLowerCase() + ":" + sname;
-                        if (!embedded[key]) {
-                          embedded[key] = Object.assign({ _pluginSource: pname }, servers[sname]);
-                          baseMcpNames[sname] = true;
-                        }
-                      }
-                    } catch {}
-                  }
-                }
-              }
-            } catch {}
-          }
-        } catch {}
-      }
-    } catch {}
-  }
 
-  // Always scan both Claude and OpenCode directories
-  var claudeDir = join(HOME, ".config", "claude");
-  var ocDir = join(HOME, ".config", "opencode");
-  scanReposDir(join(claudeDir, "repos"));
-  scanReposDir(join(ocDir, "repos"));
-  scanPluginCache(join(claudeDir, "plugins", "cache"));
-  scanPluginCache(join(ocDir, "plugins", "cache"));
 
-  embedded._baseMcpNames = baseMcpNames;
-  return embedded;
-}
-
-function getInstalledMcpList() {
-  var config = loadMcpConfig();
-  var servers = config.mcpServers || {};
-  var list = [];
-  for (var name of Object.keys(servers)) {
-    var s = servers[name];
-    list.push({ name: name, command: s.command || "", args: s.args || [], env: s.env || {}, installed: true });
-  }
-  // Merge plugin-embedded MCPs
-  var embedded = scanPluginEmbeddedMcps();
-  for (var ename of Object.keys(embedded)) {
-    if (ename === "_baseMcpNames") continue;
-    if (!servers[ename]) {
-      var e = embedded[ename];
-      list.push({ name: ename, command: e.command || "", args: e.args || [], env: e.env || {}, installed: true, pluginSource: e._pluginSource, embedded: true });
-    }
-  }
-  return list;
-}
-
-function buildMcpList(categoryFilter) {
-  fetchCatalogsAsync();
-  var installed = loadMcpConfig().mcpServers || {};
-  var embedded = scanPluginEmbeddedMcps();
-  var baseMcpNames = embedded._baseMcpNames || {};
-  var list = [];
-  var seen = {};
-  for (var entry of MCP_CATALOG) {
-    if (categoryFilter && categoryFilter !== "All" && entry.category !== categoryFilter) continue;
-    list.push({
-      name: entry.name, desc: entry.desc, command: entry.command,
-      args: entry.args.slice(), env: Object.assign({}, entry.env),
-      category: entry.category, installed: !!(installed[entry.name] || baseMcpNames[entry.name]),
-      stars: entry.stars
-    });
-    seen[entry.name] = true;
-  }
-  // Append plugin-embedded MCPs that aren't in the catalog
-  if (!categoryFilter || categoryFilter === "All") {
-    for (var ename of Object.keys(embedded)) {
-      if (ename === "_baseMcpNames") continue;
-      if (!seen[ename] && !installed[ename]) {
-        var e = embedded[ename];
-        list.push({
-          name: ename, desc: "Plugin MCP (" + (e._pluginSource || "unknown") + ")",
-          command: e.command || "", args: e.args || [], env: e.env || {},
-          category: "Plugin", installed: true, embedded: true, pluginSource: e._pluginSource
-        });
-      }
-    }
-  }
-  return list;
-}
-
-function installMcpServer(entry) {
-  var config = loadMcpConfig();
-  var serverConfig = { command: entry.command, args: entry.args.slice() };
-  var envKeys = Object.keys(entry.env || {});
-  if (envKeys.length > 0) serverConfig.env = Object.assign({}, entry.env);
-  config.mcpServers[entry.name] = serverConfig;
-  saveMcpConfig(config);
-}
-
-function uninstallMcpServer(name) {
-  var config = loadMcpConfig();
-  delete config.mcpServers[name];
-  saveMcpConfig(config);
-}
 
 // Plugin Marketplace Catalog
 
 var { exec } = require("child_process");
 
-function invalidateCatalogCache() {
-  try { unlinkSync(CATALOG_CACHE_PATH); } catch {}
-}
 
-function loadCatalogCache() {
-  try {
-    if (!existsSync(CATALOG_CACHE_PATH)) return false;
-    var cached = JSON.parse(readFileSync(CATALOG_CACHE_PATH, "utf-8"));
-    if (!cached || Date.now() - cached.time > 6 * 3600000) return false;
-    if (!Array.isArray(cached.marketplace) || cached.marketplace.length === 0) return false;
-    for (var ce of cached.marketplace) S.MARKETPLACE_CATALOG.push(ce);
-    for (var me of (cached.mcp || [])) {
-      if (!MCP_CATALOG.find(function(x) { return x.name === me.name; })) MCP_CATALOG.push(me);
-    }
-    tuiLog("marketplace catalog loaded from cache");
-    return true;
-  } catch { return false; }
-}
 
-function fetchCatalogsAsync() {
-  if (S.catalogFetched) return;
-  S.catalogFetched = true;
-  if (loadCatalogCache()) return;
 
-  var curlCmd = process.platform === "win32" ? "curl.exe" : "curl";
-  var enrichedOnce = false;
 
-  function saveCatalog() {
-    try {
-      if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
-      writeFileSync(CATALOG_CACHE_PATH, JSON.stringify({ time: Date.now(), marketplace: S.MARKETPLACE_CATALOG, mcp: MCP_CATALOG }));
-      tuiLog("marketplace catalog cached (" + S.MARKETPLACE_CATALOG.length + " plugins)");
-    } catch {}
-  }
-
-  // search-API star matching breaks on renamed repos and rate limits; per-repo
-  // lookups use the larger core API budget and follow renames, then the result
-  // is cached on disk so the budget is spent once, not per TUI open
-  function enrichCuratedStars() {
-    var missing = S.MARKETPLACE_CATALOG.filter(function(e) { return e.stars == null && e.full_name; }).slice(0, 40);
-    tuiLog("enriching stars for " + missing.length + " catalog entries");
-    for (var entry of missing) {
-      (function(target) {
-        S.catalogPending++;
-        exec(curlCmd + ' -sL -H "User-Agent: OpenCode" "https://api.github.com/repos/' + target.full_name + '"', function(err, stdout) {
-          if (!err && stdout) {
-            try {
-              var repo = JSON.parse(stdout);
-              if (repo && typeof repo.stargazers_count === "number") {
-                target.stars = repo.stargazers_count;
-                if (!target.desc && repo.description) target.desc = repo.description;
-              } else if (repo && repo.message) {
-                tuiLog("github repos api (" + target.full_name + "): " + repo.message);
-              }
-            } catch {}
-          }
-          refreshMarketplace();
-          fetchDone();
-        });
-      })(entry);
-    }
-  }
-
-  function fetchDone() {
-    S.catalogPending = Math.max(0, S.catalogPending - 1);
-    if (S.catalogPending > 0) return;
-    scheduleRender();
-    if (!enrichedOnce) {
-      enrichedOnce = true;
-      enrichCuratedStars();
-      if (S.catalogPending > 0) return;
-    }
-    saveCatalog();
-  }
-  function searchGH(query, catalog, pageNum) {
-    S.catalogPending++;
-    exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=' + query + '&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
-      fetchDone();
-      if (!err && stdout) {
-        try {
-          var json = JSON.parse(stdout);
-          if (json.message) tuiLog("github search: " + json.message);
-          if (json.items) {
-            for (var i = 0; i < json.items.length; i++) {
-              var it = json.items[i];
-              var cleanName = it.name.replace(/^claude-|^opencode-/, "");
-              var exists = catalog.find(function(m) { return m.name === (catalog === S.MARKETPLACE_CATALOG ? cleanName : it.name); });
-              if (!exists) {
-                var newItem = {
-                  name: catalog === S.MARKETPLACE_CATALOG ? cleanName : it.name,
-                  desc: it.description || "",
-                  category: "Community",
-                  stars: it.stargazers_count
-                };
-                if (catalog === S.MARKETPLACE_CATALOG) {
-                  newItem.author = it.owner.login;
-                  newItem.repoName = it.name;
-                  newItem.full_name = it.full_name;
-                  newItem.url = "https://github.com/" + it.full_name + ".git";
-                } else {
-                  newItem.command = "npx";
-                  newItem.args = ["-y", it.full_name];
-                  newItem.env = {};
-                }
-                catalog.push(newItem);
-              } else {
-                exists.stars = it.stargazers_count;
-              }
-            }
-            catalog.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
-            if (catalog === S.MARKETPLACE_CATALOG && S.pluginSubPage === "marketplace") {
-               S.marketplaceItems = buildMarketplaceList();
-               scheduleRender();
-            } else if (catalog === MCP_CATALOG && S.page === "mcp" && S.mcpSubPage === "marketplace") {
-               S.mcpItems = buildMcpList("All");
-               scheduleRender();
-            }
-          }
-        } catch(e) {}
-      }
-    });
-  }
-
-  function searchNpm(keyword) {
-    S.catalogPending++;
-    exec(curlCmd + ' -s "https://registry.npmjs.org/-/v1/search?text=keywords:' + keyword + '&size=100"', function(err, stdout) {
-      fetchDone();
-      if (err || !stdout) return;
-      try {
-        var json = JSON.parse(stdout);
-        for (var obj of (json.objects || [])) {
-          var pkg = obj.package || {};
-          var repoUrl = ((pkg.links && pkg.links.repository) || "").replace(/^git\+/, "");
-          if (!repoUrl) continue;
-          var repoMatch = repoUrl.match(/([^\/]+)\/([^\/]+?)(\.git)?$/);
-          if (!repoMatch) continue;
-          var author = repoMatch[1];
-          var repoName = repoMatch[2];
-          var shortName = pkg.name.replace(/^@[^\/]+\//, "");
-          var exists = S.MARKETPLACE_CATALOG.find(function(e) {
-            return e.name === shortName || (e.repoName || e.name) === repoName;
-          });
-          if (exists) continue;
-          S.MARKETPLACE_CATALOG.push({
-            name: shortName,
-            desc: pkg.description || "",
-            category: "Community",
-            author: author,
-            repoName: repoName,
-            full_name: author + "/" + repoName,
-            url: repoUrl.endsWith(".git") ? repoUrl : repoUrl + ".git",
-          });
-        }
-        S.MARKETPLACE_CATALOG.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
-        if (S.pluginSubPage === "marketplace") {
-          S.marketplaceItems = buildMarketplaceList();
-          scheduleRender();
-        }
-      } catch(e) {}
-    });
-  }
-
-  // the awesome-opencode list is the curated membership oracle: the fuzzy
-  // starred search may only contribute repos that the community list contains,
-  // which keeps popular plugins in and look-alike repos out
-  var awesomeSet = null;
-  function refreshMarketplace() {
-    S.MARKETPLACE_CATALOG.sort(function(a, b) { return (b.stars || 0) - (a.stars || 0); });
-    if (S.pluginSubPage === "marketplace") {
-      S.marketplaceItems = buildMarketplaceList();
-      scheduleRender();
-    }
-  }
-
-  function catalogHas(fullName) {
-    var key = fullName.toLowerCase();
-    return S.MARKETPLACE_CATALOG.find(function(e) { return (e.full_name || "").toLowerCase() === key; });
-  }
-
-  function searchPopular(pageNum) {
-    S.catalogPending++;
-    exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=opencode&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
-      fetchDone();
-      if (err || !stdout) return;
-      try {
-        var json = JSON.parse(stdout);
-        if (json.message) tuiLog("github search: " + json.message);
-        for (var it of (json.items || [])) {
-          var existing = catalogHas(it.full_name || "");
-          if (existing) {
-            existing.stars = it.stargazers_count;
-            if (!existing.desc) existing.desc = it.description || "";
-            continue;
-          }
-          if (!awesomeSet || !awesomeSet[(it.full_name || "").toLowerCase()]) continue;
-          S.MARKETPLACE_CATALOG.push({
-            name: it.name, desc: it.description || "", category: "Community",
-            stars: it.stargazers_count, author: it.owner.login, repoName: it.name,
-            full_name: it.full_name, url: "https://github.com/" + it.full_name + ".git",
-          });
-        }
-        refreshMarketplace();
-      } catch(e) {}
-    });
-  }
-
-  function fetchAwesomeList() {
-    S.catalogPending++;
-    exec(curlCmd + ' -s "https://raw.githubusercontent.com/awesome-opencode/awesome-opencode/main/README.md"', { maxBuffer: 4 * 1024 * 1024 }, function(err, stdout) {
-      fetchDone();
-      if (!err && stdout) {
-        try {
-          var section = stdout;
-          var pStart = stdout.indexOf("PLUGINS</strong>");
-          var pEnd = stdout.indexOf("THEMES</strong>");
-          if (pStart !== -1 && pEnd > pStart) section = stdout.substring(pStart, pEnd);
-          awesomeSet = {};
-          var badgeRe = /badgen\.net\/github\/stars\/([^"\/\s]+)\/([^"\/\s]+)/g;
-          var m;
-          while ((m = badgeRe.exec(section))) {
-            var author = m[1];
-            var repoName = m[2];
-            awesomeSet[(author + "/" + repoName).toLowerCase()] = true;
-            if (catalogHas(author + "/" + repoName)) continue;
-            var descMatch = section.substring(m.index, m.index + 400).match(/<i>([^<]*)<\/i>/);
-            S.MARKETPLACE_CATALOG.push({
-              name: repoName, desc: descMatch ? descMatch[1] : "", category: "Curated",
-              author: author, repoName: repoName, full_name: author + "/" + repoName,
-              url: "https://github.com/" + author + "/" + repoName + ".git",
-            });
-          }
-          refreshMarketplace();
-        } catch(e) {}
-      }
-      // the broad starred search supplies star counts for the curated entries,
-      // whose badge images carry no numbers; membership keeps it precise
-      searchPopular(1);
-      searchPopular(2);
-    });
-  }
-
-  var pluginTopic = APP_NAME === "Claude Code" ? "claude-code-plugin" : "opencode-plugin";
-  searchGH("topic:" + pluginTopic, S.MARKETPLACE_CATALOG, 1);
-  searchGH("topic:" + pluginTopic, S.MARKETPLACE_CATALOG, 2);
-  searchNpm(pluginTopic);
-  if (APP_NAME !== "Claude Code") fetchAwesomeList();
-  searchGH("topic:mcp-server", MCP_CATALOG, 1);
-  searchGH("topic:mcp-server", MCP_CATALOG, 2);
-}
-
-function buildMarketplaceList() {
-  fetchCatalogsAsync();
-  var installed = loadPlugins();
-  var installedNames = installed.map(function(p) { return p.name; });
-  var res = S.MARKETPLACE_CATALOG.map(function(m) {
-    var repoName = m.repoName || m.name;
-    var isInstalled = installedNames.indexOf(m.name) !== -1 || installedNames.indexOf(repoName) !== -1;
-    return Object.assign({}, m, { installed: isInstalled });
-  });
-  if (S.inputBuf) {
-    var q = S.inputBuf.toLowerCase();
-    res = res.filter(function(m) { return (m.name||'').toLowerCase().indexOf(q) !== -1 || (m.desc||'').toLowerCase().indexOf(q) !== -1; });
-  }
-  return res;
-}
-
-function installMarketplacePlugin(entry) {
-  var repoName = entry.repoName || entry.name;
-  var url = entry.url;
-  var plugins = loadPlugins();
-  plugins.push({ name: repoName, url: url, autoUpdate: true, enabled: true });
-  savePlugins(plugins);
-  var folderName = entry.full_name || (entry.author + "/" + repoName);
-  var dir = join(REPOS_DIR, folderName);
-  if (!existsSync(dir)) {
-    var parentDir = dirname(dir);
-    if (!existsSync(parentDir)) try { mkdirSync(parentDir, { recursive: true }); } catch {}
-    try {
-      execSync("git clone --recurse-submodules " + url + " " + folderName, { cwd: REPOS_DIR, timeout: 60000, stdio: "ignore" });
-      return null;
-    } catch (e) { return "Clone failed: " + (e.message || e); }
-  }
-  return null;
-}
 
 S.items = buildList();
 
-function buildCombinedPluginList() {
-  var git = buildPluginList();
-  var savedPlugins = loadPlugins();
-  var npm = loadNpmPlugins().map(function(np) {
-    return {
-      type: "npm",
-      name: np.name,
-      version: np.version,
-      raw: np.raw,
-      // npm plugins have no disable state — the app loads whatever opencode.json lists
-      enabled: true,
-      autoUpdate: false,
-      installed: !!np.version,
-      deployed: !!np.version,
-      updateAvail: false,
-      localHead: "",
-      remoteHead: "",
-      latestTag: np.version || "",
-      subject: "npm plugin",
-      folderName: "",
-      url: "",
-      hasBuild: false,
-      pluginFile: ""
-    };
-  });
-  if (getUpdater() && !npm.some(function(p) { return p.name === "plugin-updater"; })) {
-    npm.push({
-      type: "npm",
-      engine: true,
-      name: "plugin-updater",
-      version: getUpdaterVersion(),
-      raw: "plugin-updater",
-      enabled: true,
-      autoUpdate: true,
-      installed: true,
-      deployed: true,
-      updateAvail: false,
-      localHead: "",
-      remoteHead: "",
-      latestTag: "",
-      subject: "plugin engine",
-      folderName: "",
-      url: "",
-      hasBuild: false,
-      pluginFile: ""
-    });
-  }
-  return git.concat(npm);
-}
 
 // auth plugins declare providers in their package manifest; selecting one
 // routes the loader's requests through it
-function loadProviders() {
-  var providers = [];
-  try {
-    for (var repoName of readdirSync(REPOS_DIR)) {
-      try {
-        var pkg = JSON.parse(readFileSync(join(REPOS_DIR, repoName, "package.json"), "utf-8"));
-        var declared = (pkg.claudeHub && pkg.claudeHub.authProviders) || pkg.authProviders || [];
-        for (var provider of declared) {
-          providers.push({ name: provider.name || repoName, plugin: repoName });
-        }
-      } catch {}
-    }
-  } catch {}
-  return providers;
-}
 
 S.pluginItems = buildCombinedPluginList();
 
@@ -867,233 +220,25 @@ S.mcpItems = buildMcpList("All");
 // Marketplace state
 S.marketplaceItems = buildMarketplaceList();
 
-function buildConfirm(pushBody, pushFoot, cols, barW) {
-  pushBody("  " + MAGENTA + "#" + GRAY + " Confirm" + RST, false);
-  pushBody("", false);
-  pushBody("  " + BOLD + WHITE + trunc(S.confirmLabel, cols - 4) + RST, false);
-  pushBody("", false);
-  var opts = ["Yes", "Cancel"];
-  for (var i = 0; i < opts.length; i++) {
-    if (i === S.confirmCursor) {
-      pushBody("    " + GREEN + "  > " + BOLD + opts[i] + RST, true);
-    } else {
-      pushBody("    " + GRAY + "    " + opts[i] + RST, false);
-    }
-  }
-  pushBody("", false);
-  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-  pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Y", "Yes"], ["N/Esc", "Cancel"]]));
-}
 
-function flash(msg) {
-  S.message = msg;
-  if (S.msgTimeout) clearTimeout(S.msgTimeout);
-  S.msgTimeout = setTimeout(function() { S.message = ""; render(); }, 2500);
-}
 
 // async catalog fetches arrive in bursts — coalesce their redraws
-function scheduleRender() {
-  if (S.renderTimer) return;
-  S.renderTimer = setTimeout(function() { S.renderTimer = null; render(); }, 120);
-}
-
-function hints(pairs) {
-  return "  " + pairs.map(function(p) { return DIM + p[0] + RST + " " + p[1]; }).join("  ");
-}
-
-function spinnerFrame() { return CYAN + SPINNER_FRAMES[S.spinnerTick % SPINNER_FRAMES.length] + RST; }
-function updateSpinner() {
-  var active = S.catalogPending > 0 || (S.message && S.message.indexOf("...") !== -1);
-  if (active && !S.spinnerTimer) {
-    S.spinnerTimer = setInterval(function() { S.spinnerTick++; render(); }, 120);
-  } else if (!active && S.spinnerTimer) {
-    clearInterval(S.spinnerTimer);
-    S.spinnerTimer = null;
-  }
-}
-
-function messageLine(cols) {
-  var prefix = S.message.indexOf("...") !== -1 ? spinnerFrame() + " " : "  ";
-  return "  " + GREEN + prefix + trunc(S.message, cols - 6) + RST;
-}
 
 
-function buildHelp(pushBody, pushFoot, cols, barW) {
-  var binds = HELP_BINDINGS[S.page] || [];
-  pushBody("  " + MAGENTA + "#" + GRAY + " Keyboard shortcuts" + RST, false);
-  pushBody("", false);
-  for (var i = 0; i < binds.length; i++) {
-    pushBody("    " + BOLD + WHITE + pad(binds[i][0], 16) + RST + GRAY + binds[i][1] + RST, false);
-  }
-  pushBody("", false);
-  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-  pushFoot(hints([["Any key", "Close"]]));
-}
+
+
+
 
 // Project actions
 
-function getActions(item) {
-  var a = [
-    { key: "open", label: "Open in " + APP_NAME, icon: ">" },
-  ];
-  if (item.pinned) {
-    a.push({ key: "unpin", label: "Unpin from favorites", icon: "x" });
-  } else {
-    a.push({ key: "pin", label: "Pin to favorites", icon: "*" });
-  }
-  a.push({ key: "hide", label: "Hide from list", icon: "-" });
-  a.push({ key: "chpath", label: "Change path", icon: "~" });
-  a.push({ key: "unhide", label: "Show hidden projects", icon: "+" });
-  a.push({ key: "cancel", label: "Cancel", icon: "<" });
-  return a;
-}
 
-function getPluginActions(pitem) {
-  var a = [];
-  if (pitem.engine) {
-    a.push({ key: "updater-update", label: "Update plugin-updater" });
-    a.push({ key: "updater-run", label: "Update all plugins (early launch)" });
-    a.push({ key: "updater-add", label: "Add plugin from git URL" });
-    a.push({ key: "cancel", label: "Cancel" });
-    return a;
-  }
-  if (pitem.type === "npm") {
-    // managed via opencode.json — no disable state, only update or uninstall
-    a.push({ key: "update-npm", label: "Update npm plugin" });
-    a.push({ key: "uninstall-npm", label: "Uninstall npm plugin (removes from opencode.json)" });
-    a.push({ key: "cancel", label: "Cancel" });
-    return a;
-  }
-  if (!pitem.enabled) {
-    a.push({ key: "enable-plugin", label: "Enable plugin" });
-    a.push({ key: "cancel", label: "Cancel" });
-    return a;
-  }
-  if (pitem.updateAvail || !pitem.deployed) {
-    a.push({ key: "update", label: "Update now" });
-  }
-  if (pitem.autoUpdate) {
-    a.push({ key: "disable-auto", label: "Set to manual update" });
-  } else {
-    a.push({ key: "enable-auto", label: "Enable auto-update" });
-  }
-  a.push({ key: "update", label: "Force rebuild & deploy" });
-  a.push({ key: "commits", label: "Select specific commit (Downgrade)" });
-  a.push({ key: "disable-plugin", label: "Disable plugin" });
-  a.push({ key: "uninstall-plugin", label: "Uninstall plugin" });
-  a.push({ key: "cancel", label: "Cancel" });
-  return a;
-}
 
-function outputDir(dir) {
-  var outFile = process.env.HUB_OUTPUT || process.env.OC_OUTPUT || process.env.CC_OUTPUT;
-  if (outFile) {
-    writeFileSync(outFile, dir, "utf-8");
-  } else {
-    process.stdout.write(dir);
-  }
-}
 
-function openProject(item) {
-  cleanup();
-  outputDir(item.dir);
-  process.exit(0);
-}
 
-function togglePin(idx) {
-  var item = S.items[idx];
-  var cfg = loadConfig();
-  if (item.pinned) {
-    cfg.pinned = cfg.pinned.filter(function(d) { return d !== item.dir; });
-    flash("Unpinned: " + item.name);
-  } else {
-    cfg.pinned.push(item.dir);
-    flash("Pinned: " + item.name);
-  }
-  saveConfig(cfg);
-  S.items = buildList();
-  if (S.cursor >= S.items.length) S.cursor = Math.max(0, S.items.length - 1);
-}
 
-function hideItem(idx) {
-  var item = S.items[idx];
-  var cfg = loadConfig();
-  if (cfg.hidden.indexOf(item.dir) === -1) cfg.hidden.push(item.dir);
-  cfg.pinned = cfg.pinned.filter(function(d) { return d !== item.dir; });
-  saveConfig(cfg);
-  flash("Hidden: " + item.name);
-  S.items = buildList();
-  if (S.cursor >= S.items.length) S.cursor = Math.max(0, S.items.length - 1);
-}
 
-function unhideAll() {
-  var cfg = loadConfig();
-  var count = cfg.hidden.length;
-  cfg.hidden = [];
-  saveConfig(cfg);
-  flash("Restored " + count + " hidden project(s)");
-  S.items = buildList();
-  if (S.cursor >= S.items.length) S.cursor = Math.max(0, S.items.length - 1);
-}
 
-function getProjectId(dir) {
-  try {
-    var root = execSync("git rev-list --max-parents=0 HEAD", { cwd: dir, encoding: "utf-8", timeout: 5000 });
-    var lines = root.trim().split("\n").filter(Boolean).map(function(x) { return x.trim(); }).sort();
-    return lines[0] || null;
-  } catch (e) { return null; }
-}
 
-function changeProjectPath(oldDir, newDir) {
-  if (!existsSync(DB_PATH)) { flash("DB not found"); return; }
-  try {
-    var db = new Database(DB_PATH);
-    var count = db.query("SELECT COUNT(*) as c FROM session WHERE directory = ?").get(oldDir);
-    if (!count || count.c === 0) { db.close(); flash("No sessions at old path"); return; }
-
-    var oldSess = db.query("SELECT project_id FROM session WHERE directory = ? LIMIT 1").get(oldDir);
-    var oldPid = oldSess.project_id;
-    var newPid = getProjectId(newDir);
-
-    if (newPid) {
-      var existing = db.query("SELECT id FROM project WHERE id = ?").get(newPid);
-      if (existing) {
-        db.run("UPDATE session SET project_id = ?, directory = ? WHERE directory = ?", [newPid, newDir, oldDir]);
-      } else if (oldPid !== "global") {
-        db.run("UPDATE project SET id = ?, worktree = ? WHERE id = ?", [newPid, newDir, oldPid]);
-        db.run("UPDATE session SET project_id = ?, directory = ? WHERE directory = ?", [newPid, newDir, oldDir]);
-      } else {
-        var now = Date.now();
-        db.run("INSERT OR IGNORE INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES (?, ?, ?, ?, '[]')", [newPid, newDir, now, now]);
-        db.run("UPDATE session SET project_id = ?, directory = ? WHERE directory = ?", [newPid, newDir, oldDir]);
-      }
-      try {
-        var gitDir = join(newDir, ".git");
-        if (existsSync(gitDir)) writeFileSync(join(gitDir, "opencode"), newPid);
-      } catch (e) {}
-    } else {
-      db.run("UPDATE session SET project_id = 'global', directory = ? WHERE directory = ?", [newDir, oldDir]);
-    }
-
-    if (oldPid !== "global" && oldPid !== newPid) {
-      var rem = db.query("SELECT COUNT(*) as c FROM session WHERE project_id = ?").get(oldPid);
-      if (!rem || rem.c === 0) db.run("DELETE FROM project WHERE id = ?", [oldPid]);
-    }
-
-    db.close();
-    var cfg = loadConfig();
-    var pidx = cfg.pinned.indexOf(oldDir);
-    if (pidx !== -1) cfg.pinned[pidx] = newDir;
-    var hidx = cfg.hidden.indexOf(oldDir);
-    if (hidx !== -1) cfg.hidden[hidx] = newDir;
-    saveConfig(cfg);
-    flash("Moved " + count.c + " sessions to new path");
-    S.items = buildList();
-    if (S.cursor >= S.items.length) S.cursor = Math.max(0, S.items.length - 1);
-  } catch (e) {
-    flash("Error: " + (e.message || e));
-  }
-}
 
 // Render: projects page
 
@@ -1509,7 +654,7 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
 
 // Main render
 
-function render() {
+export function render() {
   var cols = process.stderr.columns || 80;
   var totalRows = (process.stderr.rows || 24) - 1;
   var barW = Math.min(56, cols - 4);
@@ -2134,25 +1279,6 @@ function parseKey(buf) {
 
 // Render: MCP page
 
-function getMcpActions(mitem) {
-  var a = [];
-  if (mitem.installed) {
-    a.push({ key: "uninstall", label: "Uninstall" });
-  } else {
-    a.push({ key: "install", label: "Install" });
-  }
-  var envKeys = Object.keys(mitem.env || {});
-  if (envKeys.length > 0) {
-    a.push({ key: "configure", label: "Configure API keys" });
-  }
-  // Derive npm URL from package name in args
-  var npmPkg = (mitem.args || []).find(function(arg) { return arg.indexOf("@") !== -1 && arg !== "-y"; });
-  if (npmPkg) {
-    a.push({ key: "browser", label: "Open in browser" });
-  }
-  a.push({ key: "cancel", label: "Cancel" });
-  return a;
-}
 
 function buildMcp(pushBody, pushFoot, cols, barW) {
   var nameW = Math.min(28, Math.max(18, cols - 50));
@@ -2389,11 +1515,6 @@ function handleMcpKey(key) {
 
 // Cleanup & startup
 
-function cleanup() {
-  showCur();
-  process.stderr.write(E + "H" + E + "2J");
-  try { process.stdin.setRawMode(false); } catch {}
-}
 
 process.on("exit", function() { showCur(); });
 process.on("SIGINT", function() { cleanup(); process.exit(1); });
