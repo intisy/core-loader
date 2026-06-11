@@ -105,6 +105,7 @@ global.OpenCodeAPI = {
 };
 
 var UPDATER_MODULE;
+var UPDATER_PATH = "";
 function getUpdater() {
   if (UPDATER_MODULE !== undefined) return UPDATER_MODULE;
   const fs = require('fs');
@@ -126,6 +127,7 @@ function getUpdater() {
   if (updaterPath) {
     try {
       UPDATER_MODULE = require(updaterPath);
+      UPDATER_PATH = updaterPath;
       return UPDATER_MODULE;
     } catch(e) {
       tuiLog("Failed to load updater plugin from " + updaterPath + ": " + e);
@@ -137,6 +139,16 @@ function getUpdater() {
   } catch {}
   UPDATER_MODULE = null;
   return null;
+}
+
+function getUpdaterVersion() {
+  try {
+    if (!getUpdater() || !UPDATER_PATH) return "";
+    var pkgPath = UPDATER_PATH.endsWith("index.js")
+      ? join(dirname(UPDATER_PATH), "package.json")
+      : join(UPDATER_PATH, "package.json");
+    return JSON.parse(readFileSync(pkgPath, "utf-8")).version || "";
+  } catch { return ""; }
 }
 
 function setupPlugin(repo, done) {
@@ -1121,12 +1133,53 @@ function buildCombinedPluginList() {
       pluginFile: ""
     };
   });
+  if (getUpdater() && !npm.some(function(p) { return p.name === "plugin-updater"; })) {
+    npm.push({
+      type: "npm",
+      engine: true,
+      name: "plugin-updater",
+      version: getUpdaterVersion(),
+      raw: "plugin-updater",
+      enabled: true,
+      autoUpdate: true,
+      installed: true,
+      deployed: true,
+      updateAvail: false,
+      localHead: "",
+      remoteHead: "",
+      latestTag: "",
+      subject: "plugin engine",
+      folderName: "",
+      url: "",
+      hasBuild: false,
+      pluginFile: ""
+    });
+  }
   return git.concat(npm);
+}
+
+// auth plugins declare providers in their package manifest; selecting one
+// routes the loader's requests through it
+function loadProviders() {
+  var providers = [];
+  try {
+    for (var repoName of readdirSync(REPOS_DIR)) {
+      try {
+        var pkg = JSON.parse(readFileSync(join(REPOS_DIR, repoName, "package.json"), "utf-8"));
+        var declared = (pkg.claudeHub && pkg.claudeHub.authProviders) || pkg.authProviders || [];
+        for (var provider of declared) {
+          providers.push({ name: provider.name || repoName, plugin: repoName });
+        }
+      } catch {}
+    }
+  } catch {}
+  return providers;
 }
 
 var pluginItems = buildCombinedPluginList();
 var cursor = 0;
 var pcursor = 0; // plugin page cursor
+var provCursor = 0;
 var mode = "list"; // "list" | "actions" | "input" | "pactions"
 var page = "projects"; // "projects" | "plugins"
 var acursor = 0;
@@ -1223,7 +1276,7 @@ var HELP_BINDINGS = {
     ["C", "Open custom path"], ["<- ->", "Switch page"], ["Q / Esc", "Quit"],
   ],
   plugins: [
-    ["^v / WS", "Move"], ["Enter", "Plugin actions"], ["Tab", "Installed / Marketplace"],
+    ["^v / WS", "Move"], ["Enter", "Plugin actions"], ["Tab", "Installed / Marketplace / Providers"],
     ["F", "Check for updates"], ["R", "Refresh list / catalog"], ["U", "Update selected"],
     ["A", "Update all"], ["D", "Disable selected"], ["I", "Quick install (marketplace)"],
     ["/", "Search (marketplace)"], ["<- ->", "Switch page"], ["Q / Esc", "Quit"],
@@ -1267,6 +1320,13 @@ function getActions(item) {
 
 function getPluginActions(pitem) {
   var a = [];
+  if (pitem.engine) {
+    a.push({ key: "updater-update", label: "Update plugin-updater" });
+    a.push({ key: "updater-run", label: "Update all plugins (early launch)" });
+    a.push({ key: "updater-add", label: "Add plugin from git URL" });
+    a.push({ key: "cancel", label: "Cancel" });
+    return a;
+  }
   if (pitem.type === "npm") {
     // managed via opencode.json — no disable state, only update or uninstall
     a.push({ key: "update-npm", label: "Update npm plugin" });
@@ -1516,9 +1576,10 @@ function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
   // NPM plugins: simpler read-only row
   if (pitem.type === "npm") {
     var nvstr = pitem.version ? (GRAY + "v" + pitem.version + RST) : (GRAY + "not installed" + RST);
-    pushBody("  " + bg + arrow + nameStyle + pad(trunc(pitem.name, nameW), nameW) + RST + bg + " " + CYAN + "npm" + RST + "  " + nvstr + RST, isSelected);
+    var typeLabel = pitem.engine ? (MAGENTA + "engine" + RST) : (CYAN + "npm" + RST);
+    pushBody("  " + bg + arrow + nameStyle + pad(trunc(pitem.name, nameW), nameW) + RST + bg + " " + typeLabel + "  " + nvstr + RST, isSelected);
     if (sel) {
-      var subInfo = GRAY + "     managed via npm (opencode.json)" + RST;
+      var subInfo = GRAY + "     " + (pitem.engine ? "manages plugin installs and updates" : "managed via npm (opencode.json)") + RST;
       pushBody("  " + subInfo, isSelected);
     }
     return;
@@ -1646,7 +1707,8 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
 
   var tabInstalled = pluginSubPage === "installed" ? (BOLD + WHITE + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
   var tabMarketplace = pluginSubPage === "marketplace" ? (BOLD + WHITE + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
-  var tabsLine = "  " + tabInstalled + "  " + tabMarketplace;
+  var tabProviders = pluginSubPage === "providers" ? (BOLD + WHITE + BG_SEL + " Providers " + RST) : (GRAY + " Providers " + RST);
+  var tabsLine = "  " + tabInstalled + "  " + tabMarketplace + "  " + tabProviders;
   for (var cti = 0; cti < customTabs.length; cti++) {
     var ctab = customTabs[cti];
     var ctStr = pluginSubPage === ctab.id ? (BOLD + WHITE + BG_SEL + " " + ctab.label + " " + RST) : (GRAY + " " + ctab.label + " " + RST);
@@ -1722,6 +1784,30 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
     return;
   }
 
+  if (pluginSubPage === "providers") {
+    var providers = loadProviders();
+    var selectedProvider = loadConfig().provider || "";
+    pushBody("  " + MAGENTA + "#" + GRAY + " Providers (" + providers.length + ")" + RST, false);
+    if (providers.length === 0) {
+      pushBody("  " + GRAY + "No providers installed." + RST, false);
+      pushBody("  " + GRAY + "Auth plugins such as antigravity-auth register providers here." + RST, false);
+    }
+    for (var pri = 0; pri < providers.length; pri++) {
+      var prov = providers[pri];
+      var prSel = pri === provCursor;
+      var prIcon = prov.name === selectedProvider ? (GREEN + "●" + RST) : (GRAY + "○" + RST);
+      var prArrow = prSel ? (YELLOW + " > " + RST) : "   ";
+      var prBg = prSel ? BG_SEL : "";
+      var prStyle = prSel ? (BOLD + WHITE) : DIM;
+      pushBody("  " + prBg + prArrow + prIcon + " " + prStyle + pad(trunc(prov.name, nameW), nameW) + RST + prBg + "  " + GRAY + "from " + prov.plugin + RST, prSel);
+    }
+    pushBody("", false);
+    if (message) pushFoot(messageLine(cols));
+    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select provider"], ["Tab", "Switch"], ["?", "Help"], ["Q", "Quit"]]));
+    return;
+  }
+
   // --- Custom tab sub-pages (rendered by plugin extensions) ---
   var activeTab = customTabs.find(function(t) { return t.id === pluginSubPage; });
   if (activeTab && activeTab.render) {
@@ -1777,13 +1863,18 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
   }
 
   pushBody("", false);
-  
+
   if (message) {
     pushFoot(messageLine(cols));
   }
   pushFoot("  " + GRAY + "-".repeat(barW) + RST);
 
-  pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["Tab", "Switch"], ["?", "Help"], ["Q", "Quit"]]));
+  if (mode === "pinput") {
+    pushFoot("  " + CYAN + "Plugin git URL: " + RST + inputBuf + BOLD + "|" + RST);
+    pushFoot(hints([["Enter", "Add"], ["Esc", "Cancel"]]));
+  } else {
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["Tab", "Switch"], ["?", "Help"], ["Q", "Quit"]]));
+  }
 }
 
 // Main render
@@ -1939,7 +2030,8 @@ function handlePluginKey(key) {
     if (key === "tab") {
       inputBuf = "";
       if (pluginSubPage === "installed") { pluginSubPage = "marketplace"; marketplaceItems = buildMarketplaceList(); mkCursor = 0; mkScrollOff = 0; }
-      else if (pluginSubPage === "marketplace" && customTabs.length > 0) { pluginSubPage = customTabs[0].id; }
+      else if (pluginSubPage === "marketplace") { pluginSubPage = "providers"; provCursor = 0; }
+      else if (pluginSubPage === "providers" && customTabs.length > 0) { pluginSubPage = customTabs[0].id; }
       else {
         var cIdx = customTabs.findIndex(function(t) { return t.id === pluginSubPage; });
         if (cIdx >= 0 && cIdx < customTabs.length - 1) {
@@ -1959,6 +2051,21 @@ function handlePluginKey(key) {
           mode: mode
         }, tuiApi);
       } catch(e) {}
+      return;
+    }
+
+    if (pluginSubPage === "providers") {
+      var provList = loadProviders();
+      if (key === "up" || key === "w") { provCursor = Math.max(0, provCursor - 1); }
+      else if (key === "down" || key === "s") { provCursor = Math.min(Math.max(0, provList.length - 1), provCursor + 1); }
+      else if (key === "enter" || key === "space") {
+        if (provList.length > 0 && provCursor < provList.length) {
+          var providerCfg = loadConfig();
+          providerCfg.provider = provList[provCursor].name;
+          saveConfig(providerCfg);
+          flash("Provider set to " + provList[provCursor].name);
+        }
+      }
       return;
     }
 
@@ -2105,7 +2212,37 @@ function handlePluginKey(key) {
     else if (key === "down" || key === "s") { pacursor = Math.min(acts.length - 1, pacursor + 1); }
     else if (key === "enter" || key === "space") {
       var action = acts[pacursor].key;
-      if (action === "update") {
+      if (action === "updater-update") {
+        flash("Updating plugin-updater...");
+        mode = "list";
+        render();
+        var engineModule = getUpdater();
+        var engineErr = engineModule && typeof engineModule.updateNpmPlugin === "function"
+          ? (engineModule.updateNpmPlugin("plugin-updater", CONFIG_DIR, 0) || "")
+          : "updater not available";
+        pluginItems = buildCombinedPluginList();
+        flash(engineErr ? "plugin-updater: " + engineErr : "plugin-updater updated.");
+      }
+      else if (action === "updater-run") {
+        flash("Updating all plugins...");
+        mode = "list";
+        render();
+        var runModule = getUpdater();
+        if (runModule && typeof runModule.earlyLaunch === "function") {
+          Promise.resolve(runModule.earlyLaunch(CONFIG_DIR, loadPlugins())).then(function() {
+            pluginItems = buildCombinedPluginList();
+            flash("All plugins updated. Restart " + APP_NAME + " to apply.");
+            render();
+          }).catch(function(e) { flash("Update failed: " + e); render(); });
+        } else {
+          flash("updater not available");
+        }
+      }
+      else if (action === "updater-add") {
+        inputBuf = "";
+        mode = "pinput";
+      }
+      else if (action === "update") {
         flash("Updating " + pitem.name + "...");
         mode = "list";
         render();
@@ -2744,6 +2881,32 @@ function handleSearchData(buf) {
   }
 }
 
+function handlePluginInputData(buf) {
+  if (buf[0] === 27) { inputBuf = ""; mode = "list"; return; }
+  if (buf[0] === 13 || buf[0] === 10) {
+    var url = inputBuf.trim().replace(/\.git$/, "");
+    inputBuf = "";
+    mode = "list";
+    if (!url) return;
+    var name = url.split("/").pop() || url;
+    var plugins = loadPlugins();
+    if (!plugins.some(function(r) { return r.name === name; })) {
+      plugins.push({ name: name, url: url, enabled: true, autoUpdate: true });
+      savePlugins(plugins);
+    }
+    flash("Setting up " + name + "...");
+    render();
+    setupPlugin({ name: name, url: url }, function(err) {
+      pluginItems = buildCombinedPluginList();
+      flash(err ? name + ": " + err : name + " installed. Restart " + APP_NAME + " to load.");
+      render();
+    });
+    return;
+  }
+  if (buf[0] === 127 || buf[0] === 8) { inputBuf = inputBuf.slice(0, -1); return; }
+  if (buf[0] >= 32 && buf[0] <= 126) inputBuf += String.fromCharCode(buf[0]);
+}
+
 process.stdin.on("data", function(buf) {
   var key = parseKey(buf);
   
@@ -2779,6 +2942,7 @@ process.stdin.on("data", function(buf) {
   }
   
   if (mode === "input") { handleInputData(buf); render(); return; }
+  if (mode === "pinput") { handlePluginInputData(buf); render(); return; }
   if (mode === "search") { handleSearchData(buf); render(); return; }
   var key = parseKey(buf);
   if (key) { handleKey(key); render(); }
