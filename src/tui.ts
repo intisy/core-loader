@@ -7,6 +7,7 @@ import { execSync } from "child_process";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { homedir } from "os";
+import { E, RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, BLUE, MAGENTA, BG_SEL, CLR, stringWidth, pad, trunc, timeAgo } from "./format.js";
 
 // plugin-updater runs its full update sequence on import and logs to the
 // console; library mode limits it to the API so nothing prints over the TUI
@@ -341,56 +342,11 @@ function queryProjects() {
   } catch (e) { return []; }
 }
 
-function timeAgo(ts) {
-  if (!ts) return "--";
-  var d = Date.now() - ts;
-  if (d < 60000) return "now";
-  if (d < 3600000) return Math.floor(d / 60000) + "m ago";
-  if (d < 86400000) return Math.floor(d / 3600000) + "h ago";
-  return Math.floor(d / 86400000) + "d ago";
-}
-
 function shortPath(dir) {
   var h = HOME.replace(/\\/g, "/");
   var d = dir.replace(/\\/g, "/");
   if (d.startsWith(h)) d = "~" + d.substring(h.length);
   return d;
-}
-
-function stringWidth(str) {
-  var w = 0;
-  str = String(str || "").replace(/\x1b\[[0-9;]*m/g, "");
-  for (var i = 0; i < str.length; i++) {
-    var c = str.charCodeAt(i);
-    if (c >= 0x1100 && c <= 0xD7AF || c >= 0x3040 && c <= 0x313F || c >= 0xF900 && c <= 0xFAFF || c >= 0xFF00 && c <= 0xFFEF) {
-      w += 2;
-    } else {
-      w += 1;
-    }
-  }
-  return w;
-}
-
-function pad(s, len) {
-  s = String(s || "");
-  var w = stringWidth(s);
-  var padStr = "";
-  while (w < len) { padStr += " "; w++; }
-  return s + padStr;
-}
-
-function trunc(s, len) {
-  s = String(s || "");
-  if (stringWidth(s) <= len) return s;
-  var res = "";
-  var w = 0;
-  for (var i = 0; i < s.length; i++) {
-    var cw = stringWidth(s[i]);
-    if (w + cw > len - 3) break;
-    w += cw;
-    res += s[i];
-  }
-  return res + "...";
 }
 
 function buildList() {
@@ -570,23 +526,6 @@ function fetchPluginRemotes(pluginItems) {
 // runPluginUpdate removed - delegated to updater plugin
 
 
-
-// ANSI
-
-var E = "\x1b[";
-var RST = E + "0m";
-var BOLD = E + "1m";
-var DIM = E + "2m";
-var GRAY = E + "90m";
-var WHITE = E + "37m";
-var YELLOW = E + "33m";
-var GREEN = E + "32m";
-var CYAN = E + "36m";
-var RED = E + "31m";
-var BLUE = E + "34m";
-var MAGENTA = E + "35m";
-var BG_SEL = E + "48;5;236m";
-var CLR = E + "K";
 
 var _buf = "";
 function b(s) { _buf += s; }
