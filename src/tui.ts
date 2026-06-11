@@ -11,6 +11,8 @@ import { E, RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, BLUE, MAGENTA
 import { S } from "./state.js";
 import { HOME, APP_NAME, CLI_CMD, NPM_PKG, CONFIG_DIR, CACHE_PKG_DIR, DB_PATH, CONFIG_FOLDER, CACHE_DIR, CONFIG_PATH, UPDATE_CHECK_PATH, PLUGINS_JSON, REPOS_DIR, PLUGINS_DIR, MCP_CONFIG_PATH, CATALOG_CACHE_PATH, tuiLog, MCP_CATALOG, SPINNER_FRAMES, HELP_BINDINGS } from "./env.js";
 import { hideCur, showCur } from "./out.js";
+import { getUpdater, getUpdaterVersion, setupPlugin, loadNpmPlugins, getFolderName } from "./updater.js";
+import { loadConfig, saveConfig, migrateConfigs, loadPlugins, savePlugins, loadMcpConfig, saveMcpConfig } from "./config.js";
 
 global.OpenCodeAPI = {
   getReposDir: function() { return REPOS_DIR; },
@@ -71,141 +73,12 @@ global.OpenCodeAPI = {
   }
 };
 
-function getUpdater() {
-  if (S.UPDATER_MODULE !== undefined) return S.UPDATER_MODULE;
-  const fs = require('fs');
-  const path = require('path');
-  const updaterCandidates = [
-    path.join(PLUGINS_DIR, "plugin-updater", "index.js"),
-    path.join(CONFIG_DIR, "node_modules", "plugin-updater"),
-    path.join(require('os').homedir(), ".cache", "opencode", "packages", "plugin-updater@latest", "node_modules", "plugin-updater"),
-  ];
-  // under claude the updater arrives via npx, whose cache lives in ~/.npm/_npx
-  try {
-    const npxRoot = path.join(require('os').homedir(), ".npm", "_npx");
-    for (const npxEntry of fs.readdirSync(npxRoot)) {
-      const candidate = path.join(npxRoot, npxEntry, "node_modules", "plugin-updater");
-      if (fs.existsSync(candidate)) { updaterCandidates.push(candidate); break; }
-    }
-  } catch {}
-  const updaterPath = updaterCandidates.find(function(p) { return fs.existsSync(p); });
-  if (updaterPath) {
-    try {
-      S.UPDATER_MODULE = require(updaterPath);
-      S.UPDATER_PATH = updaterPath;
-      return S.UPDATER_MODULE;
-    } catch(e) {
-      tuiLog("Failed to load updater plugin from " + updaterPath + ": " + e);
-    }
-  }
-  try {
-    S.UPDATER_MODULE = require("plugin-updater");
-    return S.UPDATER_MODULE;
-  } catch {}
-  S.UPDATER_MODULE = null;
-  return null;
-}
 
-function getUpdaterVersion() {
-  try {
-    if (!getUpdater() || !S.UPDATER_PATH) return "";
-    var pkgPath = S.UPDATER_PATH.endsWith("index.js")
-      ? join(dirname(S.UPDATER_PATH), "package.json")
-      : join(S.UPDATER_PATH, "package.json");
-    return JSON.parse(readFileSync(pkgPath, "utf-8")).version || "";
-  } catch { return ""; }
-}
 
-function setupPlugin(repo, done) {
-  var updater = getUpdater();
-  if (!updater || typeof updater.updatePluginPublic !== "function") {
-    done("updater not available");
-    return;
-  }
-  Promise.resolve(updater.updatePluginPublic(repo.name, repo.url, repo.branch))
-    .then(function() { done(""); })
-    .catch(function(e) { done(String((e && e.message) || e)); });
-}
 
-function getNpmGlobalRoot() {
-  if (S.NPM_GLOBAL_ROOT !== null) return S.NPM_GLOBAL_ROOT;
-  try { S.NPM_GLOBAL_ROOT = execSync("npm root -g", { timeout: 10000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); }
-  catch { S.NPM_GLOBAL_ROOT = ""; }
-  return S.NPM_GLOBAL_ROOT;
-}
 
-function loadNpmPlugins() {
-  // Delegate to updater API when available; fall back to direct read
-  var updater = getUpdater();
-  if (updater && typeof updater.getNpmPlugins === "function") {
-    try {
-      return updater.getNpmPlugins(CONFIG_DIR);
-    } catch(e) { /* fall through to direct read */ }
-  }
-  var ocPath = join(CONFIG_DIR, "opencode.json");
-  if (!existsSync(ocPath)) return [];
-  try {
-    var raw = readFileSync(ocPath, "utf-8");
-    var stripped = raw.replace(/^\s*\/\/[^\n]*/gm, "");
-    var oc = JSON.parse(stripped);
-    var plugins = oc.plugin || [];
-    return plugins
-      .filter(function(p) { return typeof p === "string"; })
-      .map(function(p) {
-        var name = p.replace(/@[^@\/]+$/, "") || p;
-        var version = "";
-        try {
-          // opencode installs npm plugins into ~/.cache/opencode/packages/<name>@<spec>/
-          var pkgCache = join(homedir(), ".cache", "opencode", "packages");
-          if (existsSync(pkgCache)) {
-            var cacheEntries = require("fs").readdirSync(pkgCache);
-            for (var entry of cacheEntries) {
-              if (entry !== name && entry.indexOf(name + "@") !== 0) continue;
-              var cachedPkg = join(pkgCache, entry, "node_modules", name, "package.json");
-              if (existsSync(cachedPkg)) {
-                version = JSON.parse(readFileSync(cachedPkg, "utf-8")).version || "";
-                break;
-              }
-            }
-          }
-          if (!version) {
-            var roots = [CACHE_PKG_DIR, join(CONFIG_DIR, "node_modules"), getNpmGlobalRoot()];
-            for (var root of roots) {
-              if (!root) continue;
-              var pkgPath = join(root, name, "package.json");
-              if (existsSync(pkgPath)) {
-                version = JSON.parse(readFileSync(pkgPath, "utf-8")).version || "";
-                break;
-              }
-            }
-          }
-        } catch {}
-        return { name: name, version: version, installed: version !== "", raw: p };
-      });
-  } catch { return []; }
-}
 
-function getFolderName(plugin) {
-  var match = (plugin.url || "").match(/github\.com\/([^\/]+)\/([^\/\.]+)/);
-  if (match) {
-    var nested = match[1] + "/" + plugin.name;
-    if (existsSync(join(REPOS_DIR, nested))) return nested;
-  }
-  // plugin-updater clones flat into repos/<name>
-  return plugin.name;
-}
 
-function migrateConfigs() {
-  if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
-  var legacyConfig = join(CONFIG_DIR, "oc-config.json");
-  if (existsSync(legacyConfig) && !existsSync(CONFIG_PATH)) {
-    try { copyFileSync(legacyConfig, CONFIG_PATH); } catch {}
-  }
-  var legacyPlugins = join(CONFIG_DIR, "plugins.json");
-  if (existsSync(legacyPlugins) && !existsSync(PLUGINS_JSON)) {
-    try { copyFileSync(legacyPlugins, PLUGINS_JSON); try { unlinkSync(legacyPlugins); } catch {} } catch {}
-  }
-}
 
 migrateConfigs();
 
@@ -247,18 +120,6 @@ function checkForUpdates() {
 // deferred so the TUI renders immediately instead of waiting on version checks
 setTimeout(checkForUpdates, 1500);
 
-function loadConfig() {
-  try { if (existsSync(CONFIG_PATH)) return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")); } catch {}
-  var legacy = join(CONFIG_DIR, "oc-config.json");
-  try { if (existsSync(legacy)) return JSON.parse(readFileSync(legacy, "utf-8")); } catch {}
-  return { pinned: [], hidden: [] };
-}
-function saveConfig(cfg) {
-  try {
-    if (!existsSync(CONFIG_FOLDER)) mkdirSync(CONFIG_FOLDER, { recursive: true });
-    writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
-  } catch {}
-}
 
 function queryProjects() {
   if (APP_NAME === "Claude Code") {
@@ -399,23 +260,7 @@ function loadCustomTabs() {
   } catch(e) {}
 }
 
-function loadPlugins() {
-  var updater = getUpdater();
-  if (updater && typeof updater.getPlugins === "function") {
-    try { return updater.getPlugins(CONFIG_DIR); } catch {}
-  }
-  try { if (existsSync(PLUGINS_JSON)) return JSON.parse(readFileSync(PLUGINS_JSON, "utf-8")); } catch {}
-  var legacy = join(CONFIG_DIR, "plugins.json");
-  try { if (existsSync(legacy)) return JSON.parse(readFileSync(legacy, "utf-8")); } catch {}
-  return [];
-}
 
-function savePlugins(plugins) {
-  if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
-  // config/ is always preferred; the top-level file only when config/ cannot exist
-  var target = existsSync(CONFIG_FOLDER) ? PLUGINS_JSON : join(CONFIG_DIR, "plugins.json");
-  writeFileSync(target, JSON.stringify(plugins, null, 2), "utf-8");
-}
 
 function gitText(args, cwd) {
   try {
@@ -493,19 +338,7 @@ function fetchPluginRemotes(pluginItems) {
 
 // MCP Config read/write (environment-aware)
 
-function loadMcpConfig() {
-  try {
-    if (existsSync(MCP_CONFIG_PATH)) return JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
-  } catch {}
-  return { mcpServers: {} };
-}
 
-function saveMcpConfig(config) {
-  try {
-    if (!existsSync(dirname(MCP_CONFIG_PATH))) mkdirSync(dirname(MCP_CONFIG_PATH), { recursive: true });
-    writeFileSync(MCP_CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
-  } catch {}
-}
 
 function scanPluginEmbeddedMcps() {
   var embedded = {};
