@@ -1561,7 +1561,8 @@ function buildPlugins(pushBody, pushFoot, cols, barW) {
 
   var plugins = loadPlugins();
   var hasUpdater = plugins.some(function(p) { return p.name.includes("updater") || (p.url && p.url.includes("updater")); })
-    || loadNpmPlugins().some(function(p) { return p.name.includes("updater"); });
+    || loadNpmPlugins().some(function(p) { return p.name.includes("updater"); })
+    || !!getUpdater();
   
   if (!hasUpdater) {
     if (process.env.CC_LAUNCHER === "1") {
