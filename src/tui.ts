@@ -114,6 +114,14 @@ function getUpdater() {
     path.join(CONFIG_DIR, "node_modules", "plugin-updater"),
     path.join(require('os').homedir(), ".cache", "opencode", "packages", "plugin-updater@latest", "node_modules", "plugin-updater"),
   ];
+  // under claude the updater arrives via npx, whose cache lives in ~/.npm/_npx
+  try {
+    const npxRoot = path.join(require('os').homedir(), ".npm", "_npx");
+    for (const npxEntry of fs.readdirSync(npxRoot)) {
+      const candidate = path.join(npxRoot, npxEntry, "node_modules", "plugin-updater");
+      if (fs.existsSync(candidate)) { updaterCandidates.push(candidate); break; }
+    }
+  } catch {}
   const updaterPath = updaterCandidates.find(function(p) { return fs.existsSync(p); });
   if (updaterPath) {
     try {
