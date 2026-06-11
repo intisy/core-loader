@@ -482,6 +482,10 @@ function loadCustomTabs() {
 }
 
 function loadPlugins() {
+  var updater = getUpdater();
+  if (updater && typeof updater.getPlugins === "function") {
+    try { return updater.getPlugins(CONFIG_DIR); } catch {}
+  }
   try { if (existsSync(PLUGINS_JSON)) return JSON.parse(readFileSync(PLUGINS_JSON, "utf-8")); } catch {}
   var legacy = join(CONFIG_DIR, "plugins.json");
   try { if (existsSync(legacy)) return JSON.parse(readFileSync(legacy, "utf-8")); } catch {}
@@ -2213,15 +2217,21 @@ function handlePluginKey(key) {
     else if (key === "enter" || key === "space") {
       var action = acts[pacursor].key;
       if (action === "updater-update") {
-        flash("Updating plugin-updater...");
         mode = "list";
-        render();
-        var engineModule = getUpdater();
-        var engineErr = engineModule && typeof engineModule.updateNpmPlugin === "function"
-          ? (engineModule.updateNpmPlugin("plugin-updater", CONFIG_DIR, 0) || "")
-          : "updater not available";
-        pluginItems = buildCombinedPluginList();
-        flash(engineErr ? "plugin-updater: " + engineErr : "plugin-updater updated.");
+        if (APP_NAME === "Claude Code") {
+          // the SessionStart hook runs npx plugin-updater@latest, so the engine
+          // already refreshes every session — npm -g would be a no-op here
+          flash("plugin-updater is managed via npx @latest; it updates each session.");
+        } else {
+          flash("Updating plugin-updater...");
+          render();
+          var engineModule = getUpdater();
+          var engineErr = engineModule && typeof engineModule.updateNpmPlugin === "function"
+            ? (engineModule.updateNpmPlugin("plugin-updater", CONFIG_DIR, 0) || "")
+            : "updater not available";
+          pluginItems = buildCombinedPluginList();
+          flash(engineErr ? "plugin-updater: " + engineErr : "plugin-updater updated.");
+        }
       }
       else if (action === "updater-run") {
         flash("Updating all plugins...");
