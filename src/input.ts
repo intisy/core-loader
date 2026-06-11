@@ -1,0 +1,755 @@
+// @ts-nocheck
+// Keyboard handling: key parsing and the per-page key handlers (projects,
+// plugins, mcp, confirm dialog) plus the text-input handlers.
+
+import { existsSync, unlinkSync } from "fs";
+import { join } from "path";
+import { execSync } from "child_process";
+import { RST, BOLD, WHITE, RED } from "./format.js";
+import { APP_NAME, CONFIG_DIR, HOME, PLUGINS_DIR, REPOS_DIR, MCP_CONFIG_PATH } from "./env.js";
+import { S } from "./state.js";
+import { cleanup } from "./out.js";
+import { loadConfig, saveConfig, loadPlugins, savePlugins } from "./config.js";
+import { getUpdater, setupPlugin } from "./updater.js";
+import { openProject, togglePin, hideItem, unhideAll, changeProjectPath, outputDir, getActions } from "./projects.js";
+import { getPluginActions, buildCombinedPluginList, fetchPluginRemotes } from "./plugins.js";
+import { buildMarketplaceList, installMarketplacePlugin, invalidateCatalogCache, fetchCatalogsAsync } from "./marketplace.js";
+import { getInstalledMcpList, buildMcpList, installMcpServer, uninstallMcpServer, getMcpActions } from "./mcp.js";
+import { loadProviders } from "./providers.js";
+import { flash } from "./views/common.js";
+import { render } from "./views/render.js";
+import { tuiApi } from "./tui.js";
+
+export function handleKey(key) {
+  if (S.helpOpen) { S.helpOpen = false; return; }
+  if (key === "?" && S.mode === "list") { S.helpOpen = true; return; }
+  // Page switching with left/right (only in list mode, not in actions/input)
+  if ((S.mode === "list") && (key === "left" || key === "right")) {
+    var pages = ["projects", "plugins", "mcp"];
+    var pi = pages.indexOf(S.page);
+    if (key === "left" && pi > 0) { S.page = pages[pi - 1]; S.mode = "list"; render(); return; }
+    if (key === "right" && pi < pages.length - 1) { S.page = pages[pi + 1]; S.mode = "list"; render(); return; }
+    return;
+  }
+
+  if (S.mode === "confirm") {
+    handleConfirmKey(key);
+  } else if (S.page === "projects") {
+    handleProjectKey(key);
+  } else if (S.page === "mcp") {
+    handleMcpKey(key);
+  } else {
+    handlePluginKey(key);
+  }
+}
+
+export function handleProjectKey(key) {
+  if (S.mode === "list") {
+    if (key === "up" || key === "w") { S.cursor = Math.max(0, S.cursor - 1); }
+    else if (key === "down" || key === "s") { S.cursor = Math.min(S.items.length, S.cursor + 1); }
+    else if (key === "enter" || key === "space") {
+      if (S.cursor === S.items.length) { cleanup(); process.exit(42); }
+      else if (S.items.length > 0) { S.mode = "actions"; S.acursor = 0; }
+    }
+    else if (key === "o") {
+      if (S.cursor === S.items.length) { cleanup(); process.exit(42); }
+      else if (S.items.length > 0) openProject(S.items[S.cursor]);
+    }
+    else if (key === "p") { if (S.cursor < S.items.length) togglePin(S.cursor); }
+    else if (key === "h") { if (S.cursor < S.items.length) hideItem(S.cursor); }
+    else if (key === "u") { unhideAll(); }
+    else if (key === "c") { S.mode = "input"; S.inputBuf = ""; }
+    else if (key === "q" || key === "escape") { cleanup(); process.exit(1); }
+  } else if (S.mode === "actions") {
+    var acts = getActions(S.items[S.cursor]);
+    if (key === "up" || key === "w") { S.acursor = Math.max(0, S.acursor - 1); }
+    else if (key === "down" || key === "s") { S.acursor = Math.min(acts.length - 1, S.acursor + 1); }
+    else if (key === "enter" || key === "space") {
+      var action = acts[S.acursor].key;
+      if (action === "open") { openProject(S.items[S.cursor]); }
+      else if (action === "pin" || action === "unpin") { togglePin(S.cursor); S.mode = "list"; }
+      else if (action === "hide") { hideItem(S.cursor); S.mode = "list"; }
+      else if (action === "chpath") { S.mode = "input"; S.chpathDir = S.items[S.cursor].dir; S.inputBuf = S.items[S.cursor].dir; }
+      else if (action === "unhide") { unhideAll(); S.mode = "list"; }
+      else { S.mode = "list"; }
+    }
+    else if (key === "escape" || key === "q" || key === "left") { S.mode = "list"; }
+  }
+}
+
+export function handlePluginKey(key) {
+  if (S.mode === "list") {
+    if (key === "q" || key === "escape") { cleanup(); process.exit(1); return; }
+    
+    if (key === "tab") {
+      S.inputBuf = "";
+      if (S.pluginSubPage === "installed") { S.pluginSubPage = "marketplace"; S.marketplaceItems = buildMarketplaceList(); S.mkCursor = 0; S.mkScrollOff = 0; }
+      else if (S.pluginSubPage === "marketplace") { S.pluginSubPage = "providers"; S.provCursor = 0; }
+      else if (S.pluginSubPage === "providers" && S.customTabs.length > 0) { S.pluginSubPage = S.customTabs[0].id; }
+      else {
+        var cIdx = S.customTabs.findIndex(function(t) { return t.id === S.pluginSubPage; });
+        if (cIdx >= 0 && cIdx < S.customTabs.length - 1) {
+          S.pluginSubPage = S.customTabs[cIdx + 1].id;
+        } else {
+          S.pluginSubPage = "installed";
+        }
+      }
+      return;
+    }
+
+    var activeTab = S.customTabs.find(function(t) { return t.id === S.pluginSubPage; });
+    if (activeTab && activeTab.handleKey) {
+      try {
+        activeTab.handleKey(key, {
+          pluginSubPage: S.pluginSubPage,
+          mode: S.mode
+        }, tuiApi);
+      } catch(e) {}
+      return;
+    }
+
+    if (S.pluginSubPage === "providers") {
+      var provList = loadProviders();
+      if (key === "up" || key === "w") { S.provCursor = Math.max(0, S.provCursor - 1); }
+      else if (key === "down" || key === "s") { S.provCursor = Math.min(Math.max(0, provList.length - 1), S.provCursor + 1); }
+      else if (key === "enter" || key === "space") {
+        if (provList.length > 0 && S.provCursor < provList.length) {
+          var providerCfg = loadConfig();
+          providerCfg.provider = provList[S.provCursor].name;
+          saveConfig(providerCfg);
+          flash("Provider set to " + provList[S.provCursor].name);
+        }
+      }
+      return;
+    }
+
+    if (S.pluginSubPage === "marketplace") {
+      // Actions sub-mode
+      if (S.mkMode === "actions") {
+        var mitem = S.marketplaceItems[S.mkCursor];
+        if (!mitem) { S.mkMode = "browse"; return; }
+        var mkActs = mitem.installed ? [] : [{ key: "install", label: "Install" }];
+        if (mitem.url) mkActs.push({ key: "browser", label: "Open in browser" });
+        mkActs.push({ key: "cancel", label: "Cancel" });
+        if (key === "up" || key === "w") { S.mkAcursor = Math.max(0, S.mkAcursor - 1); }
+        else if (key === "down" || key === "s") { S.mkAcursor = Math.min(mkActs.length - 1, S.mkAcursor + 1); }
+        else if (key === "enter" || key === "space") {
+          var action = mkActs[S.mkAcursor].key;
+          if (action === "install") {
+            flash("Installing " + (mitem.name || mitem.repoName) + "...");
+            render();
+            var merr = installMarketplacePlugin(mitem);
+            if (merr) flash(merr);
+            else { flash("Installed! Restart to activate."); S.pluginItems = buildCombinedPluginList(); }
+            S.marketplaceItems = buildMarketplaceList();
+            if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+          } else if (action === "browser" && mitem.url) {
+            try {
+              var openCmd = process.platform === "win32" ? "start \"\" \"" + mitem.url + "\"" : process.platform === "darwin" ? "open \"" + mitem.url + "\"" : "xdg-open \"" + mitem.url + "\"";
+              execSync(openCmd, { timeout: 5000, stdio: "ignore" });
+              flash("Opened in browser");
+            } catch(e) { flash("No browser available: " + mitem.url); }
+          }
+          S.mkMode = "browse";
+        }
+        else if (key === "escape" || key === "left") { S.mkMode = "browse"; }
+        return;
+      }
+      // Browse mode
+      if (key === "up" || key === "w") { S.mkCursor = Math.max(0, S.mkCursor - 1); }
+      else if (key === "down" || key === "s") { S.mkCursor = Math.min(S.marketplaceItems.length - 1, S.mkCursor + 1); }
+      else if (key === "enter" || key === "space") {
+        if (S.marketplaceItems.length > 0) { S.mkMode = "actions"; S.mkAcursor = 0; }
+      }
+      else if (key === "/") { S.mode = "search"; return; }
+      else if (key === "r") {
+        invalidateCatalogCache();
+        S.catalogFetched = false;
+        fetchCatalogsAsync();
+        S.marketplaceItems = buildMarketplaceList();
+        flash("Refreshing catalog...");
+      }
+      else if (key === "i") {
+        if (S.marketplaceItems.length > 0) {
+          var quickItem = S.marketplaceItems[S.mkCursor];
+          if (quickItem.installed) { flash(quickItem.name + " is already installed."); return; }
+          flash("Installing " + (quickItem.name || quickItem.repoName) + "...");
+          render();
+          var quickErr = installMarketplacePlugin(quickItem);
+          if (quickErr) flash(quickErr);
+          else { flash("Installed! Restart to activate."); S.pluginItems = buildCombinedPluginList(); }
+          S.marketplaceItems = buildMarketplaceList();
+          if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+        }
+      }
+    } else if (S.pluginSubPage === "installed") {
+      if (key === "up" || key === "w") { S.pcursor = Math.max(0, S.pcursor - 1); }
+      else if (key === "down" || key === "s") { S.pcursor = Math.min(S.pluginItems.length - 1, S.pcursor + 1); }
+      else if (key === "enter" || key === "space") {
+        if (S.pluginItems.length > 0) { S.mode = "pactions"; S.pacursor = 0; }
+      }
+      else if (key === "r") {
+        S.pluginItems = buildCombinedPluginList();
+        flash("Refreshed.");
+      }
+      else if (key === "f") {
+        flash("Fetching remotes...");
+        render();
+        fetchPluginRemotes(S.pluginItems);
+        S.pluginFetched = true;
+        var updateCount = 0;
+        for (var p of S.pluginItems) { if (p.updateAvail) updateCount++; }
+        flash(updateCount > 0 ? updateCount + " update(s) available" : "All plugins up to date");
+      }
+      else if (key === "a") {
+        var toUpdate = S.pluginItems.filter(function(p) { return p.type !== "npm" && (p.updateAvail || !p.deployed); });
+        if (toUpdate.length === 0) {
+          flash("All plugins are already up to date.");
+        } else {
+          var errors = [];
+          var remaining = toUpdate.length;
+          flash("Updating " + remaining + " plugin(s)...");
+          render();
+          toUpdate.forEach(function(pi) {
+            var repo = loadPlugins().find(function(r) { return r.name === pi.name; });
+            setupPlugin(repo || pi, function(e) {
+              if (e) errors.push(pi.name + ": " + e);
+              remaining--;
+              if (remaining <= 0) {
+                S.pluginItems = buildCombinedPluginList();
+                if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+                flash(errors.length > 0 ? errors.join("; ") : toUpdate.length + " plugin(s) updated. Restart " + APP_NAME + " to apply.");
+                render();
+              }
+            });
+          });
+        }
+      }
+      else if (key === "u") {
+        if (S.pluginItems.length > 0 && S.pluginItems[S.pcursor].type !== "npm") {
+          var p = S.pluginItems[S.pcursor];
+          flash("Updating " + p.name + "...");
+          render();
+          var pRepo = loadPlugins().find(function(r) { return r.name === p.name; });
+          setupPlugin(pRepo || p, function(err) {
+            S.pluginItems = buildCombinedPluginList();
+            if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+            flash(err ? p.name + ": " + err : p.name + " updated. Restart " + APP_NAME + " to apply.");
+            render();
+          });
+        }
+      }
+      else if (key === "d") {
+        if (S.pluginItems.length > 0 && S.pluginItems[S.pcursor].type !== "npm") {
+          var p = S.pluginItems[S.pcursor];
+          var updater = getUpdater();
+          if (updater && updater.disable) {
+            updater.disable(p);
+          } else {
+            // fallback if no updater
+            var plugins = loadPlugins();
+            var match = plugins.find(function(r) { return r.name === p.name; });
+            if (match) { match.enabled = false; savePlugins(plugins); }
+            var deployedPath = join(PLUGINS_DIR, (p.pluginFile || p.name + ".js"));
+            if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
+          }
+          S.pluginItems = buildCombinedPluginList();
+          if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+          flash(p.name + " disabled. Restart " + APP_NAME + " to unload.");
+        }
+      }
+    }
+  } else if (S.mode === "pactions") {
+    var pitem = S.pluginItems[S.pcursor];
+    var acts = getPluginActions(pitem);
+    if (key === "up" || key === "w") { S.pacursor = Math.max(0, S.pacursor - 1); }
+    else if (key === "down" || key === "s") { S.pacursor = Math.min(acts.length - 1, S.pacursor + 1); }
+    else if (key === "enter" || key === "space") {
+      var action = acts[S.pacursor].key;
+      if (action === "updater-update") {
+        S.mode = "list";
+        if (APP_NAME === "Claude Code") {
+          // the SessionStart hook runs npx plugin-updater@latest, so the engine
+          // already refreshes every session — npm -g would be a no-op here
+          flash("plugin-updater is managed via npx @latest; it updates each session.");
+        } else {
+          flash("Updating plugin-updater...");
+          render();
+          var engineModule = getUpdater();
+          var engineErr = engineModule && typeof engineModule.updateNpmPlugin === "function"
+            ? (engineModule.updateNpmPlugin("plugin-updater", CONFIG_DIR, 0) || "")
+            : "updater not available";
+          S.pluginItems = buildCombinedPluginList();
+          flash(engineErr ? "plugin-updater: " + engineErr : "plugin-updater updated.");
+        }
+      }
+      else if (action === "updater-run") {
+        flash("Updating all plugins...");
+        S.mode = "list";
+        render();
+        var runModule = getUpdater();
+        if (runModule && typeof runModule.earlyLaunch === "function") {
+          Promise.resolve(runModule.earlyLaunch(CONFIG_DIR, loadPlugins())).then(function() {
+            S.pluginItems = buildCombinedPluginList();
+            flash("All plugins updated. Restart " + APP_NAME + " to apply.");
+            render();
+          }).catch(function(e) { flash("Update failed: " + e); render(); });
+        } else {
+          flash("updater not available");
+        }
+      }
+      else if (action === "updater-add") {
+        S.inputBuf = "";
+        S.mode = "pinput";
+      }
+      else if (action === "update") {
+        flash("Updating " + pitem.name + "...");
+        S.mode = "list";
+        render();
+        var actRepo = loadPlugins().find(function(r) { return r.name === pitem.name; });
+        setupPlugin(actRepo || pitem, function(err) {
+          S.pluginItems = buildCombinedPluginList();
+          if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+          flash(err ? pitem.name + ": " + err : pitem.name + " updated. Restart " + APP_NAME + " to apply.");
+          render();
+        });
+      }
+      else if (action === "enable-auto" || action === "disable-auto") {
+        var newVal = action === "enable-auto";
+        pitem.autoUpdate = newVal;
+        var plugins = loadPlugins();
+        var match = plugins.find(function(r) { return r.name === pitem.name; });
+        if (match) { match.autoUpdate = newVal; savePlugins(plugins); }
+        flash(pitem.name + ": auto-update " + (newVal ? "ON" : "OFF"));
+        S.mode = "list";
+      }
+      else if (action === "disable-plugin") {
+        var updater = getUpdater();
+        if (updater && updater.disable) {
+          updater.disable(pitem);
+        }
+        var plugins = loadPlugins();
+        var match = plugins.find(function(r) { return r.name === pitem.name; });
+        if (match) { match.enabled = false; } else { plugins.push({ name: pitem.name, enabled: false }); }
+        savePlugins(plugins);
+        var deployedPath = join(PLUGINS_DIR, (pitem.pluginFile || pitem.name + ".js"));
+        if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
+        S.pluginItems = buildCombinedPluginList();
+        if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+        flash(pitem.name + " disabled. Restart " + APP_NAME + " to unload.");
+        S.mode = "list";
+      }
+      else if (action === "update-npm") {
+        flash("Updating " + pitem.name + "...");
+        render();
+        var updater = getUpdater();
+        var err = "";
+        if (updater && typeof updater.updateNpmPlugin === "function") {
+          err = updater.updateNpmPlugin(pitem.name, CONFIG_DIR, 0) || "";
+        } else {
+          try { execSync("npm update -g " + pitem.name, { timeout: 60000, stdio: "ignore" }); }
+          catch(e) { err = e.message; }
+        }
+        S.pluginItems = buildCombinedPluginList();
+        if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+        flash(err ? pitem.name + ": " + err : pitem.name + " updated. Restart " + APP_NAME + " to apply.");
+        S.mode = "list";
+      }
+      else if (action === "uninstall-npm") {
+        S.confirmAction = { type: "uninstall-npm", target: pitem };
+        S.confirmLabel = "Uninstall npm plugin " + pitem.name + "? It is removed from opencode.json.";
+        S.confirmCursor = 0;
+        S.mode = "confirm";
+      }
+      else if (action === "uninstall-plugin") {
+        S.confirmAction = { type: "uninstall-plugin", target: pitem };
+        S.confirmLabel = "Uninstall " + pitem.name + "? This deletes its repo clone.";
+        S.confirmCursor = 0;
+        S.mode = "confirm";
+      }
+            else if (action === "enable-plugin") {
+        var plugins = loadPlugins();
+        var match = plugins.find(function(r) { return r.name === pitem.name; });
+        if (match) { delete match.enabled; } else { plugins.push({ name: pitem.name }); }
+        savePlugins(plugins);
+        flash("Setting up " + pitem.name + "...");
+        S.mode = "list";
+        render();
+        setupPlugin(match || { name: pitem.name, url: pitem.url }, function(setupErr) {
+          S.pluginItems = buildCombinedPluginList();
+          if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+          flash(setupErr ? pitem.name + ": " + setupErr : pitem.name + " enabled and deployed. Restart " + APP_NAME + " to load.");
+          render();
+        });
+      }
+      else if (action === "commits") {
+        var dir = join(REPOS_DIR, pitem.folderName);
+        if (!existsSync(dir)) { flash("Not installed locally yet"); S.mode = "list"; return; }
+        try {
+          var log = execSync('git log -20 --format="%h|%s|%ar"', { cwd: dir, encoding: "utf-8", timeout: 5000 });
+          var lines = log.trim().split("\n");
+          S.commitItems = [];
+          for (var i = 0; i < lines.length; i++) {
+            if (!lines[i]) continue;
+            var parts = lines[i].split("|");
+            if (parts.length >= 3) {
+              S.commitItems.push({ hash: parts[0], subject: parts.slice(1, -1).join("|"), time: parts[parts.length-1] });
+            }
+          }
+          if (S.commitItems.length > 0) {
+            S.ccursor = 0; S.cscrollOff = 0; S.mode = "pcommits";
+          } else {
+            flash("No commits found"); S.mode = "list";
+          }
+        } catch (e) {
+          flash("Failed to fetch commits"); S.mode = "list";
+        }
+      }
+      else { S.mode = "list"; }
+    }
+    else if (key === "escape" || key === "q" || key === "left") { S.mode = "list"; }
+  } else if (S.mode === "confirm") {
+    if (key === "y") {
+      if (S.confirmAction && S.confirmAction.type === "uninstall-plugin") {
+        var cpitem = S.confirmAction.target;
+        var updater = getUpdater();
+        if (updater && updater.uninstall) {
+          updater.uninstall(cpitem);
+        } else {
+          var cdir = join(REPOS_DIR, cpitem.folderName);
+          var cdeployed = join(PLUGINS_DIR, (cpitem.pluginFile || cpitem.name + ".js"));
+          if (existsSync(cdir)) { try { var rmS = require("fs").rmSync; if (rmS) rmS(cdir, {recursive:true,force:true}); } catch(e){} }
+          if (existsSync(cdeployed)) { try { unlinkSync(cdeployed); } catch(e){} }
+        }
+        var cplugins = loadPlugins();
+        cplugins = cplugins.filter(function(r) { return r.name !== cpitem.name; });
+        savePlugins(cplugins);
+        S.pluginItems = buildCombinedPluginList();
+        if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+        flash(cpitem.name + " uninstalled.");
+      } else if (S.confirmAction && S.confirmAction.type === "uninstall-npm") {
+        var cpitem = S.confirmAction.target;
+        try {
+          var updater = getUpdater();
+          if (updater && typeof updater.uninstallNpmPlugin === "function") {
+            updater.uninstallNpmPlugin(cpitem.name, CONFIG_DIR);
+          } else {
+            execSync("npm uninstall -g " + cpitem.name, { timeout: 60000, stdio: "ignore" });
+            var cplugins = loadPlugins();
+            cplugins = cplugins.filter(function(r) { return r.name !== cpitem.name; });
+            savePlugins(cplugins);
+          }
+          S.pluginItems = buildCombinedPluginList();
+          if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+          flash(cpitem.name + " uninstalled. Restart " + APP_NAME + ".");
+        } catch(e) {
+          flash("Uninstall failed. Try: npm uninstall -g " + cpitem.name);
+        }
+      }
+    } else {
+      flash("Cancelled.");
+    }
+    S.mode = "list";
+    S.confirmAction = null;
+  } else if (S.mode === "pcommits") {
+    if (key === "up" || key === "w") { S.ccursor = Math.max(0, S.ccursor - 1); }
+    else if (key === "down" || key === "s") { S.ccursor = Math.min(S.commitItems.length - 1, S.ccursor + 1); }
+    else if (key === "escape" || key === "q" || key === "left") { S.mode = "list"; }
+    else if (key === "enter" || key === "space") {
+      var pitem = S.pluginItems[S.pcursor];
+      var citem = S.commitItems[S.ccursor];
+      flash("Downgrading " + pitem.name + " to " + citem.hash + "...");
+      render();
+      
+      var err = "Updater plugin not found";
+      var updater = getUpdater();
+      if (updater) {
+        var plugins = loadPlugins();
+        var repo = plugins.find(function(r) { return r.name === pitem.name; });
+        if (repo) err = updater.downgrade(repo, citem.hash);
+      } else {
+        // fallback
+        var dir = join(REPOS_DIR, pitem.folderName);
+        try {
+          execSync("git reset --hard", { cwd: dir, timeout: 15000, stdio: "ignore" });
+          execSync("git checkout " + citem.hash, { cwd: dir, timeout: 15000, stdio: "ignore" });
+        } catch (e) {
+          flash("Checkout failed"); S.mode = "list"; return;
+        }
+      }
+      if (err === "Success" || !err) err = "";
+      
+      S.pluginItems = buildCombinedPluginList();
+      flash(err ? pitem.name + ": " + err : pitem.name + " downgraded. Restart " + APP_NAME + " to apply.");
+      S.mode = "list";
+    }
+  }
+}
+
+export function handleInputData(buf) {
+  if (buf[0] === 27) { S.mode = "list"; S.chpathDir = ""; return; }
+  if (buf[0] === 3) { cleanup(); process.exit(1); }
+  if (buf[0] === 13 || buf[0] === 10) {
+    var p = S.inputBuf.trim();
+    if (p) {
+      if (p.charAt(0) === "~") p = HOME + p.substring(1);
+      p = p.replace(/\//g, "\\");
+      if (S.chpathDir) {
+        if (p === S.chpathDir) { flash("Same path, nothing changed"); S.mode = "list"; S.chpathDir = ""; return; }
+        if (existsSync(p)) {
+          changeProjectPath(S.chpathDir, p);
+        } else {
+          flash("Path not found: " + p);
+        }
+        S.mode = "list"; S.chpathDir = "";
+      } else {
+        if (existsSync(p)) {
+          cleanup();
+          outputDir(p);
+          process.exit(0);
+        } else {
+          flash("Path not found: " + p);
+          S.mode = "list";
+        }
+      }
+    } else {
+      S.mode = "list"; S.chpathDir = "";
+    }
+    return;
+  }
+  if (buf[0] === 127 || buf[0] === 8) {
+    S.inputBuf = S.inputBuf.substring(0, S.inputBuf.length - 1);
+    return;
+  }
+  if (buf[0] >= 32 && buf[0] < 127) {
+    S.inputBuf += String.fromCharCode(buf[0]);
+    return;
+  }
+  var s = buf.toString("utf-8");
+  if (s.length > 0) {
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      if (c >= 32) S.inputBuf += s.charAt(i);
+    }
+  }
+}
+
+export function parseKey(buf) {
+  if (buf[0] === 27) {
+    if (buf.length === 1) return "escape";
+    if (buf[1] === 91) {
+      if (buf[2] === 65) return "up";
+      if (buf[2] === 66) return "down";
+      if (buf[2] === 67) return "right";
+      if (buf[2] === 68) return "left";
+    }
+    return null;
+  }
+  if (buf[0] === 13 || buf[0] === 10) return "enter";
+  if (buf[0] === 32) return "space";
+  if (buf[0] === 3) { cleanup(); process.exit(1); }
+  if (buf[0] === 9) return "tab";
+  var ch = String.fromCharCode(buf[0]).toLowerCase();
+  if ("wsadqpchofuximynr/?".indexOf(ch) !== -1) return ch;
+  return null;
+}
+
+export function handleConfirmKey(key) {
+  if (key === "up" || key === "w") { S.confirmCursor = 0; return; }
+  if (key === "down" || key === "s") { S.confirmCursor = 1; return; }
+  var accepted = key === "y" || ((key === "enter" || key === "space") && S.confirmCursor === 0);
+  var rejected = key === "escape" || key === "q" || key === "n" || ((key === "enter" || key === "space") && S.confirmCursor === 1);
+  if (accepted) {
+    if (S.confirmAction && S.confirmAction.type === "uninstall-plugin") {
+      var pitem = S.confirmAction.target;
+      // Remove from plugins.json
+      var plugins = loadPlugins();
+      plugins = plugins.filter(function(r) { return r.name !== pitem.name; });
+      savePlugins(plugins);
+      // Delete deployed file
+      var deployedPath = join(PLUGINS_DIR, (pitem.pluginFile || pitem.name + ".js"));
+      if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
+      // Delete repo folder
+      var repoDir = join(REPOS_DIR, pitem.folderName);
+      if (existsSync(repoDir)) {
+        try { execSync((process.platform === "win32" ? "rmdir /s /q " : "rm -rf ") + '"' + repoDir + '"', { timeout: 30000, stdio: "ignore" }); } catch {}
+      }
+      S.pluginItems = buildCombinedPluginList();
+      if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+      flash(pitem.name + " uninstalled.");
+    } else if (S.confirmAction && S.confirmAction.type === "uninstall-npm") {
+      var npmName = S.confirmAction.target.name || S.confirmAction.target;
+      var npmUpdater = getUpdater();
+      var npmErr = "updater not available";
+      if (npmUpdater && typeof npmUpdater.uninstallNpmPlugin === "function") {
+        npmErr = npmUpdater.uninstallNpmPlugin(npmName, CONFIG_DIR) || "";
+      }
+      S.pluginItems = buildCombinedPluginList();
+      if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
+      flash(npmErr ? npmName + ": " + npmErr : npmName + " removed from opencode.json. Restart " + APP_NAME + " to unload.");
+    } else if (S.confirmAction && S.confirmAction.type === "uninstall-mcp") {
+      uninstallMcpServer(S.confirmAction.target);
+      S.mcpItems = buildMcpList("All");
+      if (S.mcpCursor >= S.mcpItems.length) S.mcpCursor = Math.max(0, S.mcpItems.length - 1);
+      flash(S.confirmAction.target + " removed.");
+    }
+    S.confirmAction = null;
+    S.confirmLabel = "";
+    S.confirmCursor = 0;
+    S.mode = "list";
+  } else if (rejected) {
+    S.confirmAction = null;
+    S.confirmLabel = "";
+    S.confirmCursor = 0;
+    S.mode = "list";
+    flash("Cancelled.");
+  }
+}
+
+export function handleMcpKey(key) {
+  if (S.mcpMode === "catalog") {
+    if (key === "tab") {
+      S.inputBuf = "";
+      if (S.mcpSubPage === "installed") { S.mcpSubPage = "marketplace"; S.mcpItems = buildMcpList("All"); S.mcpCursor = 0; }
+      else { S.mcpSubPage = "installed"; S.mcpCursor = 0; }
+      S.mcpScrollOff = 0;
+    }
+    else if (key === "up" || key === "w") { S.mcpCursor = Math.max(0, S.mcpCursor - 1); }
+    else if (key === "down" || key === "s") {
+      var maxLen = S.mcpSubPage === "installed" ? getInstalledMcpList().length : S.mcpItems.length;
+      S.mcpCursor = Math.min(maxLen - 1, S.mcpCursor + 1);
+    }
+    else if (key === "enter" || key === "space") {
+      var maxLen = S.mcpSubPage === "installed" ? getInstalledMcpList().length : S.mcpItems.length;
+      if (maxLen > 0) { S.mcpMode = "actions"; S.mcpAcursor = 0; }
+    }
+    else if (key === "/" && S.mcpSubPage === "marketplace") { S.mode = "search"; return; }
+    else if (key === "i" && S.mcpSubPage === "marketplace") {
+      if (S.mcpItems.length > 0 && !S.mcpItems[S.mcpCursor].installed) {
+        installMcpServer(S.mcpItems[S.mcpCursor]);
+        S.mcpItems = buildMcpList("All");
+        flash(S.mcpItems[S.mcpCursor] ? S.mcpItems[S.mcpCursor].name + " installed. Restart " + APP_NAME + " to activate." : "Installed.");
+      }
+    }
+    else if (key === "x" && S.mcpSubPage === "installed") {
+      var instList = getInstalledMcpList();
+      if (instList.length > 0 && S.mcpCursor < instList.length) {
+        S.confirmAction = { type: "uninstall-mcp", target: instList[S.mcpCursor].name };
+        S.confirmLabel = "Remove MCP server " + instList[S.mcpCursor].name + "?";
+        S.confirmCursor = 0;
+        S.mode = "confirm";
+      }
+    }
+    else if (key === "r") {
+      invalidateCatalogCache();
+      S.catalogFetched = false;
+      S.mcpItems = buildMcpList("All");
+      flash("Refreshing catalog...");
+    }
+    else if (key === "q" || key === "escape") { cleanup(); process.exit(1); }
+  } else if (S.mcpMode === "actions") {
+    var activeList = S.mcpSubPage === "installed" ? getInstalledMcpList() : S.mcpItems;
+    var mitem = activeList[S.mcpCursor];
+    if (!mitem) { S.mcpMode = "catalog"; return; }
+    var acts = getMcpActions(mitem);
+    if (key === "up" || key === "w") { S.mcpAcursor = Math.max(0, S.mcpAcursor - 1); }
+    else if (key === "down" || key === "s") { S.mcpAcursor = Math.min(acts.length - 1, S.mcpAcursor + 1); }
+    else if (key === "enter" || key === "space") {
+      var action = acts[S.mcpAcursor].key;
+      if (action === "install") {
+        installMcpServer(mitem);
+        S.mcpItems = buildMcpList("All");
+        flash(mitem.name + " installed. Restart " + APP_NAME + " to activate.");
+        S.mcpMode = "catalog";
+      } else if (action === "uninstall") {
+        S.confirmAction = { type: "uninstall-mcp", target: mitem.name };
+        S.confirmLabel = "Remove MCP server " + mitem.name + "?";
+        S.confirmCursor = 0;
+        S.mode = "confirm";
+        S.mcpMode = "catalog";
+      } else if (action === "configure") {
+        flash("Set env vars in " + MCP_CONFIG_PATH);
+        S.mcpMode = "catalog";
+      } else if (action === "browser") {
+        var npmPkg = (mitem.args || []).find(function(arg) { return arg.indexOf("@") !== -1 && arg !== "-y"; });
+        if (npmPkg) {
+          var pkgName = npmPkg.replace(/@latest$/, "").replace(/@\^.*$/, "");
+          var npmUrl = "https://www.npmjs.com/package/" + pkgName;
+          try {
+            var openCmd = process.platform === "win32" ? "start \"\" \"" + npmUrl + "\"" : process.platform === "darwin" ? "open \"" + npmUrl + "\"" : "xdg-open \"" + npmUrl + "\"";
+            execSync(openCmd, { timeout: 5000, stdio: "ignore" });
+            flash("Opened in browser");
+          } catch(e) { flash("No browser available: " + npmUrl); }
+        }
+        S.mcpMode = "catalog";
+      } else {
+        S.mcpMode = "catalog";
+      }
+    }
+    else if (key === "escape" || key === "left") { S.mcpMode = "catalog"; }
+  }
+}
+
+export function handleSearchData(buf) {
+  if (buf[0] === 27) { S.mode = "list"; return; }
+  if (buf[0] === 3) { cleanup(); process.exit(1); }
+  if (buf[0] === 13 || buf[0] === 10) { S.mode = "list"; return; }
+  if (buf[0] === 8 || buf[0] === 127) {
+    S.inputBuf = S.inputBuf.slice(0, -1);
+    if (S.page === "plugins" || S.page === "mcp") {
+    var hasUpdater = loadPlugins().some(function(p) { return p.name.includes("updater") || p.url.includes("updater"); });
+    if (!hasUpdater) {
+      pushLine("");
+      pushBody("  " + BOLD + RED + "Updater Plugin Missing" + RST, false);
+      pushBody("  The hub requires an updater plugin to manage installations.", false);
+      pushLine("");
+      pushBody("  Press " + BOLD + WHITE + "Enter" + RST + " to install the default updater plugin.", false);
+      
+      // Override key handler for this screen
+      if (S.globalKeyHandler !== "updater_install") {
+        S.globalKeyHandler = "updater_install";
+      }
+      return;
+    } else {
+      if (S.globalKeyHandler === "updater_install") S.globalKeyHandler = null;
+    }
+  }
+
+  if (S.page === "plugins") { S.marketplaceItems = buildMarketplaceList(); S.mkCursor = 0; }
+    else if (S.page === "mcp") { S.mcpItems = buildMcpList("All"); S.mcpCursor = 0; }
+    return;
+  }
+  var ch = String.fromCharCode(buf[0]);
+  if (buf[0] >= 32 && buf[0] <= 126) {
+    S.inputBuf += ch;
+    if (S.page === "plugins") { S.marketplaceItems = buildMarketplaceList(); S.mkCursor = 0; }
+    else if (S.page === "mcp") { S.mcpItems = buildMcpList("All"); S.mcpCursor = 0; }
+  }
+}
+
+export function handlePluginInputData(buf) {
+  if (buf[0] === 27) { S.inputBuf = ""; S.mode = "list"; return; }
+  if (buf[0] === 13 || buf[0] === 10) {
+    var url = S.inputBuf.trim().replace(/\.git$/, "");
+    S.inputBuf = "";
+    S.mode = "list";
+    if (!url) return;
+    var name = url.split("/").pop() || url;
+    var plugins = loadPlugins();
+    if (!plugins.some(function(r) { return r.name === name; })) {
+      plugins.push({ name: name, url: url, enabled: true, autoUpdate: true });
+      savePlugins(plugins);
+    }
+    flash("Setting up " + name + "...");
+    render();
+    setupPlugin({ name: name, url: url }, function(err) {
+      S.pluginItems = buildCombinedPluginList();
+      flash(err ? name + ": " + err : name + " installed. Restart " + APP_NAME + " to load.");
+      render();
+    });
+    return;
+  }
+  if (buf[0] === 127 || buf[0] === 8) { S.inputBuf = S.inputBuf.slice(0, -1); return; }
+  if (buf[0] >= 32 && buf[0] <= 126) S.inputBuf += String.fromCharCode(buf[0]);
+}
+

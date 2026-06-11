@@ -5,7 +5,7 @@
 import { RST, BOLD, DIM, GRAY, WHITE, GREEN, CYAN, MAGENTA, trunc, pad } from "../format.js";
 import { S } from "../state.js";
 import { HELP_BINDINGS, SPINNER_FRAMES } from "../env.js";
-import { render } from "../tui.js";
+import { render } from "./render.js";
 
 export function flash(msg) {
   S.message = msg;
