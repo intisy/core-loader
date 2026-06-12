@@ -15,7 +15,6 @@ import { openProject, togglePin, hideItem, unhideAll, changeProjectPath, outputD
 import { getPluginActions, buildCombinedPluginList, fetchPluginRemotes } from "./plugins.js";
 import { buildMarketplaceList, installMarketplacePlugin, invalidateCatalogCache, fetchCatalogsAsync } from "./marketplace.js";
 import { getInstalledMcpList, buildMcpList, installMcpServer, uninstallMcpServer, getMcpActions } from "./mcp.js";
-import { loadProviders } from "./providers.js";
 import { flash } from "./views/common.js";
 import { render } from "./views/render.js";
 import { tuiApi } from "./tui.js";
@@ -84,8 +83,8 @@ export function handlePluginKey(key) {
     if (key === "tab") {
       S.inputBuf = "";
       if (S.pluginSubPage === "installed") { S.pluginSubPage = "marketplace"; S.marketplaceItems = buildMarketplaceList(); S.mkCursor = 0; S.mkScrollOff = 0; }
-      else if (S.pluginSubPage === "marketplace") { S.pluginSubPage = "providers"; S.provCursor = 0; }
-      else if (S.pluginSubPage === "providers" && S.customTabs.length > 0) { S.pluginSubPage = S.customTabs[0].id; }
+      else if (S.pluginSubPage === "marketplace" && S.customTabs.length > 0) { S.pluginSubPage = S.customTabs[0].id; }
+      else if (S.pluginSubPage === "marketplace") { S.pluginSubPage = "installed"; }
       else {
         var cIdx = S.customTabs.findIndex(function(t) { return t.id === S.pluginSubPage; });
         if (cIdx >= 0 && cIdx < S.customTabs.length - 1) {
@@ -108,20 +107,6 @@ export function handlePluginKey(key) {
       return;
     }
 
-    if (S.pluginSubPage === "providers") {
-      var provList = loadProviders();
-      if (key === "up" || key === "w") { S.provCursor = Math.max(0, S.provCursor - 1); }
-      else if (key === "down" || key === "s") { S.provCursor = Math.min(Math.max(0, provList.length - 1), S.provCursor + 1); }
-      else if (key === "enter" || key === "space") {
-        if (provList.length > 0 && S.provCursor < provList.length) {
-          var providerCfg = loadConfig();
-          providerCfg.provider = provList[S.provCursor].name;
-          saveConfig(providerCfg);
-          flash("Provider set to " + provList[S.provCursor].name);
-        }
-      }
-      return;
-    }
 
     if (S.pluginSubPage === "marketplace") {
       // Actions sub-mode

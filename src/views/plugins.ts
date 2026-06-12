@@ -1,13 +1,12 @@
 // @ts-nocheck
 // Plugins page rendering: plugin rows (git + npm + engine), the installed /
-// marketplace / providers / custom sub-pages, and the action/commit menus.
+// marketplace / custom sub-pages, and the action/commit menus.
 
 import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, MAGENTA, BG_SEL, stringWidth, pad, trunc } from "../format.js";
 import { S } from "../state.js";
-import { loadConfig, loadPlugins } from "../config.js";
+import { loadPlugins } from "../config.js";
 import { loadNpmPlugins, getUpdater } from "../updater.js";
 import { getPluginActions } from "../plugins.js";
-import { loadProviders } from "../providers.js";
 import { hints, messageLine, spinnerFrame } from "./common.js";
 
 export function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
@@ -150,8 +149,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
 
   var tabInstalled = S.pluginSubPage === "installed" ? (BOLD + WHITE + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
   var tabMarketplace = S.pluginSubPage === "marketplace" ? (BOLD + WHITE + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
-  var tabProviders = S.pluginSubPage === "providers" ? (BOLD + WHITE + BG_SEL + " Providers " + RST) : (GRAY + " Providers " + RST);
-  var tabsLine = "  " + tabInstalled + "  " + tabMarketplace + "  " + tabProviders;
+  var tabsLine = "  " + tabInstalled + "  " + tabMarketplace;
   for (var cti = 0; cti < S.customTabs.length; cti++) {
     var ctab = S.customTabs[cti];
     var ctStr = S.pluginSubPage === ctab.id ? (BOLD + WHITE + BG_SEL + " " + ctab.label + " " + RST) : (GRAY + " " + ctab.label + " " + RST);
@@ -224,30 +222,6 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
     if (S.message) { pushFoot(messageLine(cols)); }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
     pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["/", "Search"], ["?", "Help"], ["Q", "Quit"]]));
-    return;
-  }
-
-  if (S.pluginSubPage === "providers") {
-    var providers = loadProviders();
-    var selectedProvider = loadConfig().provider || "";
-    pushBody("  " + MAGENTA + "#" + GRAY + " Providers (" + providers.length + ")" + RST, false);
-    if (providers.length === 0) {
-      pushBody("  " + GRAY + "No providers installed." + RST, false);
-      pushBody("  " + GRAY + "Auth plugins such as antigravity-auth register providers here." + RST, false);
-    }
-    for (var pri = 0; pri < providers.length; pri++) {
-      var prov = providers[pri];
-      var prSel = pri === S.provCursor;
-      var prIcon = prov.name === selectedProvider ? (GREEN + "●" + RST) : (GRAY + "○" + RST);
-      var prArrow = prSel ? (YELLOW + " > " + RST) : "   ";
-      var prBg = prSel ? BG_SEL : "";
-      var prStyle = prSel ? (BOLD + WHITE) : DIM;
-      pushBody("  " + prBg + prArrow + prIcon + " " + prStyle + pad(trunc(prov.name, nameW), nameW) + RST + prBg + "  " + GRAY + "from " + prov.plugin + RST, prSel);
-    }
-    pushBody("", false);
-    if (S.message) pushFoot(messageLine(cols));
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select provider"], ["Tab", "Switch"], ["?", "Help"], ["Q", "Quit"]]));
     return;
   }
 

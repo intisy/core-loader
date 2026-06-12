@@ -36,7 +36,6 @@ export const S = {
   pluginFetched: false,
   pluginUpdating: "",
   pluginSubPage: "installed",
-  provCursor: 0,
   commitItems: [],
   ccursor: 0,
   cscrollOff: 0,

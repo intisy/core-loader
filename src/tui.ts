@@ -148,31 +148,21 @@ export var tuiApi = {
 
 function loadCustomTabs() {
   S.customTabs = [];
-  // 1. Scan installed plugins for tui-extension.js
+  function loadExt(extPath) {
+    if (!extPath || !existsSync(extPath)) return;
+    try {
+      var mod = require(extPath);
+      var fn = (mod && mod.default) || mod;
+      if (typeof fn === "function") fn(tuiApi);
+    } catch(e) { tuiLog("custom tab load failed (" + extPath + "): " + e); }
+  }
+  // 1. The active loader declares its own extension via env (absolute path)
+  loadExt(process.env.HUB_TUI_EXTENSION);
+  // 2. Installed plugins may ship a tui-extension.js in their repo root
   try {
     var pl = loadPlugins();
     for (var i = 0; i < pl.length; i++) {
-      var p = pl[i];
-      var extPath = join(REPOS_DIR, getFolderName(p), "tui-extension.js");
-      if (existsSync(extPath)) {
-        try {
-          var ext = require(extPath);
-          if (typeof ext === "function") {
-            ext(tuiApi);
-          }
-        } catch(e) {}
-      }
-    }
-  } catch(e) {}
-  // 2. Scan the launcher's own repo root (parent of core/) for tui-extension.js
-  try {
-    var scriptDir = dirname(fileURLToPath(import.meta.url));
-    var launcherExt = join(scriptDir, "..", "tui-extension.js");
-    if (existsSync(launcherExt)) {
-      var lext = require(launcherExt);
-      if (typeof lext === "function") {
-        lext(tuiApi);
-      }
+      loadExt(join(REPOS_DIR, getFolderName(pl[i]), "tui-extension.js"));
     }
   } catch(e) {}
 }
@@ -207,10 +197,6 @@ var { exec } = require("child_process");
 
 
 S.items = buildList();
-
-
-// auth plugins declare providers in their package manifest; selecting one
-// routes the loader's requests through it
 
 S.pluginItems = buildCombinedPluginList();
 
@@ -346,6 +332,14 @@ if (arg) {
     process.exit(0);
   }
   process.exit(42);
+}
+
+// load loader/plugin-provided tabs, then honor an initial-tab hint (e.g. the
+// cc wrapper sets HUB_OPEN_TAB=provider for `cc auth login`)
+loadCustomTabs();
+if (process.env.HUB_OPEN_TAB) {
+  S.page = "plugins";
+  S.pluginSubPage = process.env.HUB_OPEN_TAB;
 }
 
 // disable any mouse reporting a previous program left enabled — pointer
