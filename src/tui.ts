@@ -148,12 +148,15 @@ export var tuiApi = {
 
 function loadCustomTabs() {
   S.customTabs = [];
+  tuiLog("loadCustomTabs: HUB_TUI_EXTENSION=" + (process.env.HUB_TUI_EXTENSION || "(unset)"));
   function loadExt(extPath) {
-    if (!extPath || !existsSync(extPath)) return;
+    if (!extPath) return;
+    if (!existsSync(extPath)) { tuiLog("loadExt: missing " + extPath); return; }
     try {
       var mod = require(extPath);
       var fn = (mod && mod.default) || mod;
-      if (typeof fn === "function") fn(tuiApi);
+      if (typeof fn === "function") { fn(tuiApi); tuiLog("loadExt: registered from " + extPath); }
+      else tuiLog("loadExt: not a function (" + extPath + "), keys=" + Object.keys(mod || {}).join(","));
     } catch(e) { tuiLog("custom tab load failed (" + extPath + "): " + e); }
   }
   // 1. The active loader declares its own extension via env (absolute path)
