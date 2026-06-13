@@ -143,7 +143,7 @@ export var tuiApi = {
   loadConfig: function() { return loadConfig(); },
   saveConfig: function(cfg) { return saveConfig(cfg); },
   loadPlugins: function() { return loadPlugins(); },
-  flash: function(msg) { S.message = msg; messageTimeout = Date.now() + 3000; },
+  flash: function(msg) { flash(msg); },
   // let a custom tab capture raw text (search boxes); routes keys to its handleKey
   setTextInput: function(on) { S.mode = on ? "tabinput" : "list"; }
 };
