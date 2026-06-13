@@ -738,3 +738,23 @@ export function handlePluginInputData(buf) {
   if (buf[0] >= 32 && buf[0] <= 126) S.inputBuf += String.fromCharCode(buf[0]);
 }
 
+// raw text input routed to the active custom tab when it sets S.mode="tabinput"
+// (the parseKey whitelist can't deliver free text); the tab toggles back to "list"
+export function handleTabInputData(buf) {
+  var activeTab = S.customTabs.find(function(t) { return t.id === S.pluginSubPage; });
+  if (!activeTab || !activeTab.handleKey) { S.mode = "list"; return; }
+  var key = null;
+  if (buf[0] === 3) { cleanup(); process.exit(1); }
+  else if (buf[0] === 27 && buf.length === 1) key = "escape";
+  else if (buf[0] === 27 && buf[1] === 91) {
+    if (buf[2] === 65) key = "up"; else if (buf[2] === 66) key = "down";
+    else if (buf[2] === 67) key = "right"; else if (buf[2] === 68) key = "left";
+    else return;
+  }
+  else if (buf[0] === 13 || buf[0] === 10) key = "enter";
+  else if (buf[0] === 127 || buf[0] === 8) key = "backspace";
+  else if (buf[0] >= 32 && buf[0] < 127) key = String.fromCharCode(buf[0]);
+  else return;
+  try { activeTab.handleKey(key, { pluginSubPage: S.pluginSubPage, mode: S.mode }, tuiApi); } catch(e) {}
+}
+

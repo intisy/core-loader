@@ -17,7 +17,7 @@ import { buildMarketplaceList } from "./marketplace.js";
 import { buildCombinedPluginList } from "./plugins.js";
 import { buildList, outputDir } from "./projects.js";
 import { render } from "./views/render.js";
-import { parseKey, handleKey, handleInputData, handlePluginInputData, handleSearchData } from "./input.js";
+import { parseKey, handleKey, handleInputData, handlePluginInputData, handleSearchData, handleTabInputData } from "./input.js";
 
 global.OpenCodeAPI = {
   getReposDir: function() { return REPOS_DIR; },
@@ -388,6 +388,7 @@ process.stdin.on("data", function(buf) {
   if (S.mode === "input") { handleInputData(buf); render(); return; }
   if (S.mode === "pinput") { handlePluginInputData(buf); render(); return; }
   if (S.mode === "search") { handleSearchData(buf); render(); return; }
+  if (S.mode === "tabinput") { handleTabInputData(buf); render(); return; }
   var key = parseKey(buf);
   if (key) { handleKey(key); render(); }
 });
