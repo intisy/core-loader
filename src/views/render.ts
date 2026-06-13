@@ -80,6 +80,9 @@ export function render() {
 
     var hiddenAbove = activeScroll;
     var hiddenBelow = bodyLines.length - (activeScroll + innerH);
+    // at scroll-top the reserved top marker is blank; drop the header's trailing
+    // blank so it doesn't stack into a double gap above the tabs
+    if (hiddenAbove === 0 && headLines.length && headLines[headLines.length - 1] === "") headLines.pop();
     var visibleBody = bodyLines.slice(activeScroll, activeScroll + innerH);
     visibleBody.unshift(hiddenAbove > 0 ? "  " + GRAY + "     ^ " + hiddenAbove + " more" + RST : "");
     visibleBody.push(hiddenBelow > 0 ? "  " + GRAY + "     v " + hiddenBelow + " more" + RST : "");
