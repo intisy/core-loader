@@ -299,6 +299,45 @@ export function handlePluginKey(key) {
           render();
         });
       }
+      else if (action === "check-updates") {
+        S.mode = "list";
+        flash("Fetching remotes...");
+        render();
+        fetchPluginRemotes(S.pluginItems);
+        S.pluginFetched = true;
+        var ucount = 0;
+        for (var pu of S.pluginItems) { if (pu.updateAvail) ucount++; }
+        flash(ucount > 0 ? ucount + " update(s) available" : "All plugins up to date");
+      }
+      else if (action === "update-all") {
+        S.mode = "list";
+        var toUpdate = S.pluginItems.filter(function(p) { return p.type !== "npm" && (p.updateAvail || !p.deployed); });
+        if (toUpdate.length === 0) {
+          flash("All plugins are already up to date.");
+        } else {
+          var allErrors = [];
+          var allRemaining = toUpdate.length;
+          flash("Updating " + allRemaining + " plugin(s)...");
+          render();
+          toUpdate.forEach(function(pi) {
+            var repo = loadPlugins().find(function(r) { return r.name === pi.name; });
+            setupPlugin(repo || pi, function(e) {
+              if (e) allErrors.push(pi.name + ": " + e);
+              allRemaining--;
+              if (allRemaining <= 0) {
+                S.pluginItems = buildCombinedPluginList();
+                flash(allErrors.length > 0 ? allErrors.join("; ") : toUpdate.length + " plugin(s) updated. Restart " + APP_NAME + " to apply.");
+                render();
+              }
+            });
+          });
+        }
+      }
+      else if (action === "refresh") {
+        S.pluginItems = buildCombinedPluginList();
+        flash("Refreshed.");
+        S.mode = "list";
+      }
       else if (action === "enable-auto" || action === "disable-auto") {
         var newVal = action === "enable-auto";
         pitem.autoUpdate = newVal;

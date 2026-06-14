@@ -123,7 +123,14 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
     if (pinfo) pushBody("  " + GRAY + pinfo + RST, false);
     pushBody("", false);
     var pacts = getPluginActions(ppitem);
+    var lastCat = null;
     for (var pj = 0; pj < pacts.length; pj++) {
+      var pcat = pacts[pj].cat;
+      if (pcat && pcat !== lastCat) {
+        if (lastCat !== null) pushBody("", false);   // blank line between categories
+        pushBody("    " + BOLD + CYAN + pcat + RST, false);
+        lastCat = pcat;
+      }
       if (pj === S.pacursor) {
         pushBody("    " + GREEN + "  > " + BOLD + pacts[pj].label + RST, true);
       } else {

@@ -149,17 +149,20 @@ export function getPluginActions(pitem) {
     return a;
   }
   if (pitem.updateAvail || !pitem.deployed) {
-    a.push({ key: "update", label: "Update now" });
+    a.push({ cat: "Update", key: "update", label: "Update now" });
   }
+  a.push({ cat: "Update", key: "check-updates", label: "Check for updates" });
+  a.push({ cat: "Update", key: "update-all", label: "Update all plugins" });
+  a.push({ cat: "Update", key: "update", label: "Force rebuild & deploy" });
+  a.push({ cat: "Update", key: "refresh", label: "Refresh list" });
   if (pitem.autoUpdate) {
-    a.push({ key: "disable-auto", label: "Set to manual update" });
+    a.push({ cat: "Settings", key: "disable-auto", label: "Set to manual update" });
   } else {
-    a.push({ key: "enable-auto", label: "Enable auto-update" });
+    a.push({ cat: "Settings", key: "enable-auto", label: "Enable auto-update" });
   }
-  a.push({ key: "update", label: "Force rebuild & deploy" });
-  a.push({ key: "commits", label: "Select specific commit (Downgrade)" });
-  a.push({ key: "disable-plugin", label: "Disable plugin" });
-  a.push({ key: "uninstall-plugin", label: "Uninstall plugin" });
+  a.push({ cat: "Settings", key: "commits", label: "Select specific commit (Downgrade)" });
+  a.push({ cat: "Manage", key: "disable-plugin", label: "Disable plugin" });
+  a.push({ cat: "Manage", key: "uninstall-plugin", label: "Uninstall plugin" });
   a.push({ key: "cancel", label: "Cancel" });
   return a;
 }
