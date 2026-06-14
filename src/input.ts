@@ -752,6 +752,7 @@ export function handleTabInputData(buf) {
     else return;
   }
   else if (buf[0] === 13 || buf[0] === 10) key = "enter";
+  else if (buf[0] === 9) key = "tab";
   else if (buf[0] === 127 || buf[0] === 8) key = "backspace";
   else if (buf[0] >= 32 && buf[0] < 127) key = String.fromCharCode(buf[0]);
   else return;
