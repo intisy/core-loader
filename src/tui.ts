@@ -25,27 +25,6 @@ global.OpenCodeAPI = {
   getConfigDir: function() { return CONFIG_DIR; },
   log: function(msg) { flash(msg); render(); },
   
-  // Bidirectional sync for files between Claude and OpenCode environments
-  syncFile: function(sourcePath, relativeDestPath) {
-    const fs = require('fs');
-    const path = require('path');
-    const homedir = require('os').homedir();
-    
-    // Sync to .config/claude and .config/opencode
-    const ccDest = path.join(homedir, ".config", "claude", relativeDestPath);
-    const ocDest = path.join(homedir, ".config", "opencode", relativeDestPath);
-    
-    [ccDest, ocDest].forEach(dest => {
-      if (sourcePath !== dest) {
-        const parentDir = path.dirname(dest);
-        if (!fs.existsSync(parentDir)) fs.mkdirSync(parentDir, { recursive: true });
-        if (fs.existsSync(sourcePath)) {
-          fs.copyFileSync(sourcePath, dest);
-        }
-      }
-    });
-  },
-  
   // Deploy a plugin binary/script to the active plugins directory
   deployPlugin: function(pluginName, sourcePath) {
     const fs = require('fs');
