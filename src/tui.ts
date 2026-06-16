@@ -124,8 +124,25 @@ export var tuiApi = {
   loadPlugins: function() { return loadPlugins(); },
   flash: function(msg) { flash(msg); },
   // let a custom tab capture raw text (search boxes); routes keys to its handleKey
-  setTextInput: function(on) { S.mode = on ? "tabinput" : "list"; }
+  setTextInput: function(on) { S.mode = on ? "tabinput" : "list"; },
+  // suspend the loader TUI, run a blocking raw-stdin routine (the shared account
+  // menu), then re-attach input and redraw
+  runBlocking: function(fn) { return runBlocking(fn); }
 };
+
+function runBlocking(fn) {
+  try { process.stdin.removeListener("data", onData); } catch {}
+  try { process.stdin.setRawMode(false); } catch {}
+  try { process.stdin.pause(); } catch {}
+  showCur();
+  return Promise.resolve().then(fn).catch(function() {}).then(function() {
+    try { process.stdin.setRawMode(true); } catch {}
+    try { process.stdin.resume(); } catch {}
+    process.stdin.on("data", onData);
+    hideCur();
+    render();
+  });
+}
 
 function loadCustomTabs() {
   S.customTabs = [];
@@ -332,9 +349,9 @@ process.stdin.setRawMode(true);
 process.stdin.resume();
 
 
-process.stdin.on("data", function(buf) {
+function onData(buf) {
   var key = parseKey(buf);
-  
+
   if (S.globalKeyHandler === "updater_install") {
     if (key === "enter" || key === "space") {
       process.stdout.write("\x1b[?25h\n\x1b[36mInstalling updater plugin...\x1b[0m\n");
@@ -372,5 +389,6 @@ process.stdin.on("data", function(buf) {
   if (S.mode === "tabinput") { handleTabInputData(buf); render(); return; }
   var key = parseKey(buf);
   if (key) { handleKey(key); render(); }
-});
+}
+process.stdin.on("data", onData);
 // @ts-nocheck
