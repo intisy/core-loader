@@ -57,13 +57,6 @@ global.OpenCodeAPI = {
   }
 };
 
-
-
-
-
-
-
-
 migrateConfigs();
 
 function checkForUpdates() {
@@ -103,12 +96,6 @@ function checkForUpdates() {
 
 // deferred so the TUI renders immediately instead of waiting on version checks
 setTimeout(checkForUpdates, 1500);
-
-
-
-
-
-// Plugin data
 
 
 // Registry Pattern: plugins extend the TUI by exporting a function from tui-extension.js
@@ -165,94 +152,15 @@ function loadCustomTabs() {
   } catch(e) {}
 }
 
-
-
-
-
-
-// runPluginUpdate removed - delegated to updater plugin
-
-
-
-
-
-// MCP Config read/write (environment-aware)
-
-
-
-
-
-
-
-
-// Plugin Marketplace Catalog
-
 var { exec } = require("child_process");
-
-
-
-
 
 
 S.items = buildList();
 
 S.pluginItems = buildCombinedPluginList();
 
-// MCP state
 S.mcpItems = buildMcpList("All");
-// Marketplace state
 S.marketplaceItems = buildMarketplaceList();
-
-
-
-// async catalog fetches arrive in bursts — coalesce their redraws
-
-
-
-
-
-
-// Project actions
-
-
-
-
-
-
-
-
-
-
-// Render: projects page
-
-
-
-
-// Render: plugins page
-
-
-
-// Main render
-
-
-// Key handling
-
-
-
-
-
-
-
-// Render: MCP page
-
-
-
-// MCP key handling
-
-
-
-// Cleanup & startup
-
 
 process.on("exit", function() { showCur(); });
 process.on("SIGINT", function() { cleanup(); process.exit(1); });
@@ -268,8 +176,7 @@ if (arg) {
   if (arg === "test") {
     console.log("\x1b[36mRunning Loader Tests...\x1b[0m\n");
     var passed = 0, failed = 0;
-    
-    // Core tests
+
     console.log("Core Checks:");
     const fs = require('fs');
     if (fs.existsSync(PLUGINS_DIR)) {
@@ -277,8 +184,7 @@ if (arg) {
     } else {
       console.log("\x1b[31m  [✗]\x1b[0m Plugin directory missing"); failed++;
     }
-    
-    // Plugin tests
+
     var testApi = {
       addTest: function(category, name, fn) {
         console.log("\n" + category + " Checks:");
@@ -359,9 +265,7 @@ function onData(buf) {
         const { execSync } = require('child_process');
         const fs = require('fs');
         const path = require('path');
-        // Install via npm globally
         execSync("npm install -g plugin-updater", { stdio: "inherit" });
-        // Add to opencode.json plugin array
         const ocPath = path.join(CONFIG_DIR, "opencode.json");
         var ocData = {};
         if (fs.existsSync(ocPath)) {

@@ -88,7 +88,6 @@ export function scanPluginEmbeddedMcps() {
     } catch {}
   }
 
-  // Always scan both Claude and OpenCode directories
   var claudeDir = join(HOME, ".config", "claude");
   var ocDir = join(HOME, ".config", "opencode");
   scanReposDir(join(claudeDir, "repos"));
@@ -108,7 +107,6 @@ export function getInstalledMcpList() {
     var s = servers[name];
     list.push({ name: name, command: s.command || "", args: s.args || [], env: s.env || {}, installed: true });
   }
-  // Merge plugin-embedded MCPs
   var embedded = scanPluginEmbeddedMcps();
   for (var ename of Object.keys(embedded)) {
     if (ename === "_baseMcpNames") continue;
@@ -137,7 +135,6 @@ export function buildMcpList(categoryFilter) {
     });
     seen[entry.name] = true;
   }
-  // Append plugin-embedded MCPs that aren't in the catalog
   if (!categoryFilter || categoryFilter === "All") {
     for (var ename of Object.keys(embedded)) {
       if (ename === "_baseMcpNames") continue;
@@ -180,7 +177,6 @@ export function getMcpActions(mitem) {
   if (envKeys.length > 0) {
     a.push({ key: "configure", label: "Configure API keys" });
   }
-  // Derive npm URL from package name in args
   var npmPkg = (mitem.args || []).find(function(arg) { return arg.indexOf("@") !== -1 && arg !== "-y"; });
   if (npmPkg) {
     a.push({ key: "browser", label: "Open in browser" });

@@ -72,12 +72,11 @@ export function getNpmGlobalRoot() {
 }
 
 export function loadNpmPlugins() {
-  // Delegate to updater API when available; fall back to direct read
   var updater = getUpdater();
   if (updater && typeof updater.getNpmPlugins === "function") {
     try {
       return updater.getNpmPlugins(CONFIG_DIR);
-    } catch(e) { /* fall through to direct read */ }
+    } catch(e) {}
   }
   var ocPath = join(CONFIG_DIR, "opencode.json");
   if (!existsSync(ocPath)) return [];

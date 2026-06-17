@@ -586,14 +586,11 @@ export function handleConfirmKey(key) {
   if (accepted) {
     if (S.confirmAction && S.confirmAction.type === "uninstall-plugin") {
       var pitem = S.confirmAction.target;
-      // Remove from plugins.json
       var plugins = loadPlugins();
       plugins = plugins.filter(function(r) { return r.name !== pitem.name; });
       savePlugins(plugins);
-      // Delete deployed file
       var deployedPath = join(PLUGINS_DIR, (pitem.pluginFile || pitem.name + ".js"));
       if (existsSync(deployedPath)) { try { unlinkSync(deployedPath); } catch {} }
-      // Delete repo folder
       var repoDir = join(REPOS_DIR, pitem.folderName);
       if (existsSync(repoDir)) {
         try { execSync((process.platform === "win32" ? "rmdir /s /q " : "rm -rf ") + '"' + repoDir + '"', { timeout: 30000, stdio: "ignore" }); } catch {}
