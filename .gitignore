@@ -2,3 +2,4 @@ node_modules/
 dist/
 .idea/
 *.log
+package-lock.json
