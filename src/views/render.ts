@@ -53,7 +53,9 @@ export function render() {
   }
   updateSpinner();
 
-  // one blank line above the footer separator for breathing room (counted in maxBody)
+  // exactly one blank line above the footer separator: drop any trailing blanks a
+  // view appended, then add the single spacer (so menus never show a double gap)
+  while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1] === "") bodyLines.pop();
   if (footLines.length) footLines.unshift("");
 
   // 3. Viewport calculation
