@@ -84,10 +84,30 @@ export const MCP_CATALOG = [
   { name: "everart", desc: "AI image generation", command: "npx", args: ["-y", "@modelcontextprotocol/server-everart"], env: { EVERART_API_KEY: "" }, category: "AI" },
 ];
 
+// Known GitHub repos for curated entries whose npm package can't be resolved to
+// one (the official @modelcontextprotocol/server-* packages have no repository
+// field — and several aren't even published — so they all live in the servers
+// monorepo). Pre-seeding full_name lets the star enrichment skip the npm lookup
+// and fetch stars directly (deduped per repo). Entries not listed here fall back
+// to npm->repo resolution (works for standalone packages like todoist, docker).
+const MCP_SERVERS_MONOREPO = "modelcontextprotocol/servers";
+export const CURATED_MCP_REPOS = {
+  "brave-search": MCP_SERVERS_MONOREPO, "fetch": MCP_SERVERS_MONOREPO, "filesystem": MCP_SERVERS_MONOREPO,
+  "memory": MCP_SERVERS_MONOREPO, "postgres": MCP_SERVERS_MONOREPO, "sqlite": MCP_SERVERS_MONOREPO,
+  "redis": MCP_SERVERS_MONOREPO, "aws-kb-retrieval": MCP_SERVERS_MONOREPO, "github": MCP_SERVERS_MONOREPO,
+  "google-maps": MCP_SERVERS_MONOREPO, "sentry": MCP_SERVERS_MONOREPO, "everart": MCP_SERVERS_MONOREPO,
+  "slack": MCP_SERVERS_MONOREPO, "git": MCP_SERVERS_MONOREPO, "sequential-thinking": MCP_SERVERS_MONOREPO,
+  "puppeteer": MCP_SERVERS_MONOREPO,
+  "exa": "exa-labs/exa-mcp-server", "tavily": "tavily-ai/tavily-mcp", "context7": "upstash/context7",
+  "playwright": "microsoft/playwright-mcp", "cloudflare": "cloudflare/mcp-server-cloudflare",
+  "notion": "makenotion/notion-mcp-server", "supabase": "supabase-community/supabase-mcp",
+};
+
 // these are hand-picked, verified packages; the flag drives the marketplace
-// curated marker and the npm->repo->stars enrichment. registry entries pushed
-// in at runtime carry no curated flag, which is correct.
-MCP_CATALOG.forEach(function (e) { e.curated = true; });
+// curated marker and the npm->repo->stars enrichment. A pre-seeded full_name (when
+// known) lets enrichment fetch stars directly. registry entries pushed in at
+// runtime carry no curated flag, which is correct.
+MCP_CATALOG.forEach(function (e) { e.curated = true; if (CURATED_MCP_REPOS[e.name]) e.full_name = CURATED_MCP_REPOS[e.name]; });
 
 export const MCP_CATEGORIES = ["All", "Search", "Development", "Files", "Database", "Cloud", "Communication", "Productivity", "Data", "AI", "Plugin"];
 

@@ -142,7 +142,21 @@ export function fetchCatalogsAsync() {
         fetchDone();
       });
     }
+    function queueRepo(target, fullName) {
+      var first = !repoToEntries[fullName];
+      if (first) repoToEntries[fullName] = [];
+      repoToEntries[fullName].push(target);
+      target.full_name = fullName;
+      if (first) fetchRepoStars(fullName);   // dedupe: only the first entry triggers the repo lookup
+    }
+    // entries with a pre-seeded repo (env.ts CURATED_MCP_REPOS) skip npm entirely —
+    // the official @modelcontextprotocol/server-* packages have no resolvable repo
     for (var entry of pending) {
+      if (entry.full_name) queueRepo(entry, entry.full_name);
+    }
+    // the rest: resolve a repo from the npm package's repository field, then fetch
+    for (var entry2 of pending) {
+      if (entry2.full_name) continue;
       (function(target) {
         var pkg = npmPkgFromArgs(target.args);
         if (!pkg) return;
@@ -153,15 +167,10 @@ export function fetchCatalogsAsync() {
           try {
             var meta = JSON.parse(stdout);
             var fullName = repoFromNpmUrl(meta && meta.repository && meta.repository.url);
-            if (!fullName) return;
-            var first = !repoToEntries[fullName];
-            if (first) repoToEntries[fullName] = [];
-            repoToEntries[fullName].push(target);
-            target.full_name = fullName;
-            if (first) fetchRepoStars(fullName);   // dedupe: only first entry triggers the repo lookup
+            if (fullName) queueRepo(target, fullName);
           } catch {}
         });
-      })(entry);
+      })(entry2);
     }
   }
 
