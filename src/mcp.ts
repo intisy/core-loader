@@ -148,6 +148,9 @@ export function buildMcpList(categoryFilter) {
       }
     }
   }
+  // rank by GitHub stars — curated and registry entries are intermixed, not pinned;
+  // unstarred (curated awaiting enrichment, embedded plugins) fall to the bottom
+  list.sort(function (a, b) { return (b.stars || 0) - (a.stars || 0); });
   return list;
 }
 
