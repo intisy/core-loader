@@ -59,11 +59,3 @@ export function timeAgo(ts) {
   if (d < 86400000) return Math.floor(d / 3600000) + "h ago";
   return Math.floor(d / 86400000) + "d ago";
 }
-
-// compact star/count formatting: 193108 -> "193k", 1500000 -> "1.5M"
-export function compactCount(n) {
-  if (typeof n !== "number" || !isFinite(n)) return "";
-  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-  return String(n);
-}

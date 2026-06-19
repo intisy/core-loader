@@ -131,7 +131,7 @@ export function buildMcpList(categoryFilter) {
       name: entry.name, desc: entry.desc, command: entry.command,
       args: entry.args.slice(), env: Object.assign({}, entry.env),
       category: entry.category, installed: !!(installed[entry.name] || baseMcpNames[entry.name]),
-      stars: entry.stars
+      stars: entry.stars, curated: entry.curated, full_name: entry.full_name
     });
     seen[entry.name] = true;
   }

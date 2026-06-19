@@ -23,7 +23,14 @@ export function loadCatalogCache() {
     if (!Array.isArray(cached.marketplace) || cached.marketplace.length === 0) return false;
     for (var ce of cached.marketplace) S.MARKETPLACE_CATALOG.push(ce);
     for (var me of (cached.mcp || [])) {
-      if (!MCP_CATALOG.find(function(x) { return x.name === me.name; })) MCP_CATALOG.push(me);
+      var existing = MCP_CATALOG.find(function(x) { return x.name === me.name; });
+      // a pre-seeded curated entry stays in place but adopts the cached stars/repo
+      // it was enriched with on a previous run (otherwise they'd re-fetch every open)
+      if (!existing) MCP_CATALOG.push(me);
+      else {
+        if (existing.stars == null && me.stars != null) existing.stars = me.stars;
+        if (!existing.full_name && me.full_name) existing.full_name = me.full_name;
+      }
     }
     tuiLog("marketplace catalog loaded from cache");
     return true;
@@ -33,9 +40,11 @@ export function loadCatalogCache() {
 export function fetchCatalogsAsync() {
   if (S.catalogFetched) return;
   S.catalogFetched = true;
-  if (loadCatalogCache()) return;
-
   var curlCmd = process.platform === "win32" ? "curl.exe" : "curl";
+  // even with a warm cache the curated MCP entries still need their stars derived
+  // (the cache predates them) — run that enrichment, then skip the cold registry search
+  if (loadCatalogCache()) { enrichCuratedMcpStars(); return; }
+
   var enrichedOnce = false;
 
   function saveCatalog() {
@@ -85,6 +94,84 @@ export function fetchCatalogsAsync() {
     }
     saveCatalog();
   }
+  // the curated MCP entries have no full_name/stars; derive a repo from their
+  // npm package (registry .repository.url), fetch stars once per unique repo,
+  // and apply to every entry sharing it. uvx entries are python, no npm -> skip.
+  function npmPkgFromArgs(args) {
+    for (var i = 0; i < (args || []).length; i++) {
+      var a = args[i];
+      if (a.charAt(0) === "-") continue;                 // flags like -y, --db-path
+      if (a.indexOf("/") !== -1 && a.charAt(0) !== "@") continue; // urls / paths
+      if (a.indexOf("://") !== -1) continue;
+      if (a.charAt(0) === "." || a.charAt(0) === "@" || /^[a-z0-9]/i.test(a)) {
+        if (a === ".") continue;
+        return a.replace(/@latest$/, "").replace(/@[\d^~].*$/, "");
+      }
+    }
+    return null;
+  }
+  function repoFromNpmUrl(url) {
+    if (!url) return null;
+    var clean = url.replace(/^git\+/, "").replace(/^git:\/\//, "https://");
+    var m = clean.match(/github\.com[\/:]([^\/]+)\/([^\/]+?)(\.git)?$/);
+    return m ? m[1] + "/" + m[2] : null;
+  }
+  function enrichCuratedMcpStars() {
+    var pending = MCP_CATALOG.filter(function(e) {
+      return e.curated && e.stars == null && e.command !== "uvx";
+    });
+    var repoToEntries = {};   // unique repo -> entries waiting on its stars
+    function applyStars(fullName, stars) {
+      var list = repoToEntries[fullName] || [];
+      for (var k = 0; k < list.length; k++) {
+        list[k].full_name = fullName;
+        if (typeof stars === "number") list[k].stars = stars;
+      }
+    }
+    function fetchRepoStars(fullName) {
+      S.catalogPending++;
+      exec(curlCmd + ' -sL -H "User-Agent: OpenCode" "https://api.github.com/repos/' + fullName + '"', function(err, stdout) {
+        if (!err && stdout) {
+          try {
+            var repo = JSON.parse(stdout);
+            if (repo && typeof repo.stargazers_count === "number") { applyStars(fullName, repo.stargazers_count); saveCatalog(); }
+            else if (repo && repo.message) tuiLog("github repos api (" + fullName + "): " + repo.message);
+          } catch {}
+        }
+        refreshMcp();
+        fetchDone();
+      });
+    }
+    for (var entry of pending) {
+      (function(target) {
+        var pkg = npmPkgFromArgs(target.args);
+        if (!pkg) return;
+        S.catalogPending++;
+        exec(curlCmd + ' -sL -H "User-Agent: OpenCode" "https://registry.npmjs.org/' + pkg + '"', function(err, stdout) {
+          fetchDone();
+          if (err || !stdout) return;
+          try {
+            var meta = JSON.parse(stdout);
+            var fullName = repoFromNpmUrl(meta && meta.repository && meta.repository.url);
+            if (!fullName) return;
+            var first = !repoToEntries[fullName];
+            if (first) repoToEntries[fullName] = [];
+            repoToEntries[fullName].push(target);
+            target.full_name = fullName;
+            if (first) fetchRepoStars(fullName);   // dedupe: only first entry triggers the repo lookup
+          } catch {}
+        });
+      })(entry);
+    }
+  }
+
+  function refreshMcp() {
+    if (S.page === "mcp" && S.mcpSubPage === "marketplace") {
+      S.mcpItems = buildMcpList("All");
+      scheduleRender();
+    }
+  }
+
   function searchGH(query, catalog, pageNum) {
     S.catalogPending++;
     exec(curlCmd + ' -s -H "User-Agent: OpenCode" "https://api.github.com/search/repositories?q=' + query + '&sort=stars&order=desc&per_page=100&page=' + pageNum + '"', function(err, stdout) {
@@ -259,6 +346,7 @@ export function fetchCatalogsAsync() {
   if (APP_NAME !== "Claude Code") fetchAwesomeList();
   searchGH("topic:mcp-server", MCP_CATALOG, 1);
   searchGH("topic:mcp-server", MCP_CATALOG, 2);
+  enrichCuratedMcpStars();
 }
 
 export function buildMarketplaceList() {

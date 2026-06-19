@@ -1,7 +1,7 @@
 // @ts-nocheck
 // MCP page rendering: installed / marketplace sub-pages and the action menu.
 
-import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, MAGENTA, BG_SEL, stringWidth, pad, trunc, compactCount } from "../format.js";
+import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, MAGENTA, CYAN, BG_SEL, stringWidth, pad, trunc } from "../format.js";
 import { S } from "../state.js";
 import { getInstalledMcpList, buildMcpList, getMcpActions } from "../mcp.js";
 import { hints, messageLine } from "./common.js";
@@ -69,7 +69,7 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
   } else {
     // Marketplace
     S.mcpItems = buildMcpList("All");
-    pushBody("  " + BOLD + WHITE + "MCP Marketplace (" + S.mcpItems.length + " available)" + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST), false);
+    pushBody("  " + BOLD + WHITE + "MCP Marketplace (" + S.mcpItems.length + " available)" + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST) + "  " + CYAN + "✦" + RST + DIM + " = curated" + RST, false);
     for (var i = 0; i < S.mcpItems.length; i++) {
       var m = S.mcpItems[i];
       var sel = i === S.mcpCursor;
@@ -77,18 +77,17 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
       var bg = sel ? BG_SEL : "";
       var nameStyle = sel ? (BOLD + WHITE) : DIM;
       var statusIcon = m.installed ? (GREEN + "\u25cf" + RST) : (GRAY + "\u25cb" + RST);
-      var starNum = m.stars != null ? compactCount(m.stars) : "";
-      var starRaw = starNum ? " ★" + starNum : "";
+      // ✦ marks hand-picked entries; non-curated get 2 spaces to keep columns aligned
+      var curatedMark = m.curated ? (CYAN + "✦ " + RST) : "  ";
+      var starRaw = m.stars != null ? " ★" + m.stars : "";
       var starVis = starRaw.length;
-      var usedW = 2 + 3 + 2 + nameW + 2 + starVis;
-      // cap the description so long registry blurbs don't sprawl across the row;
-      // keeps rows uniform and the star column aligned regardless of terminal width
-      var descW = Math.max(10, Math.min(60, cols - usedW - 2));
+      var usedW = 2 + 3 + 2 + 2 + nameW + 2 + starVis;
+      var descW = Math.max(10, cols - usedW - 2);
       var descText = trunc((m.desc||"").replace(/\r?\n/g, " "), descW);
       var descVis = stringWidth(descText);
       var gapW = Math.max(1, cols - usedW - descVis);
-      var starStr = starRaw ? (YELLOW + " ".repeat(gapW) + "★" + starNum + RST) : "";
-      pushBody("  " + bg + arrow + statusIcon + " " + nameStyle + pad(trunc(m.name, nameW), nameW) + RST + bg + "  " + GRAY + descText + RST + starStr + RST, sel);
+      var starStr = starRaw ? (YELLOW + " ".repeat(gapW) + "★" + m.stars + RST) : "";
+      pushBody("  " + bg + arrow + statusIcon + " " + curatedMark + nameStyle + pad(trunc(m.name, nameW), nameW) + RST + bg + "  " + GRAY + descText + RST + starStr + RST, sel);
       if (sel) {
         pushBody("  " + GRAY + "     " + m.command + " " + (m.args || []).join(" ") + RST, sel);
         var ek = Object.keys(m.env || {});

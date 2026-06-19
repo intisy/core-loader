@@ -84,6 +84,11 @@ export const MCP_CATALOG = [
   { name: "everart", desc: "AI image generation", command: "npx", args: ["-y", "@modelcontextprotocol/server-everart"], env: { EVERART_API_KEY: "" }, category: "AI" },
 ];
 
+// these are hand-picked, verified packages; the flag drives the marketplace
+// curated marker and the npm->repo->stars enrichment. registry entries pushed
+// in at runtime carry no curated flag, which is correct.
+MCP_CATALOG.forEach(function (e) { e.curated = true; });
+
 export const MCP_CATEGORIES = ["All", "Search", "Development", "Files", "Database", "Cloud", "Communication", "Productivity", "Data", "AI", "Plugin"];
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

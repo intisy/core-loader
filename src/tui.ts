@@ -112,6 +112,9 @@ export var tuiApi = {
   flash: function(msg) { flash(msg); },
   // let a custom tab capture raw text (search boxes); routes keys to its handleKey
   setTextInput: function(on) { S.mode = on ? "tabinput" : "list"; },
+  // redraw on demand (a tab finished async work off the keypress path, e.g. a
+  // login input resolving or a loopback callback auto-completing)
+  refresh: function() { render(); },
   // suspend the loader TUI, run a blocking raw-stdin routine (the shared account
   // menu), then re-attach input and redraw
   runBlocking: function(fn) { return runBlocking(fn); }
