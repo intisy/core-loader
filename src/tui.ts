@@ -102,8 +102,8 @@ setTimeout(checkForUpdates, 1500);
 // The function receives a tuiApi object with registerTab() to add custom tabs
 export var tuiApi = {
   registerTab: function(tab) {
-    if (tab && tab.id && tab.label) {
-      S.customTabs.push(tab);
+    if (tab && tab.id && tab.label && !S.customTabs.some(function(t) { return t.id === tab.id; })) {
+      S.customTabs.push(tab);   // dedup by id so a double-load can't add the tab twice
     }
   },
   loadConfig: function() { return loadConfig(); },
