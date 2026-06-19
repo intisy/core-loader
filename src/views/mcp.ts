@@ -13,7 +13,7 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
     var mitem = S.mcpSubPage === "installed" ? getInstalledMcpList()[S.mcpCursor] : S.mcpItems[S.mcpCursor];
     if (!mitem) { S.mcpMode = "catalog"; return; }
     var acts = getMcpActions(mitem);
-    pushBody("  " + MAGENTA + "#" + GRAY + " " + mitem.name + RST, false);
+    pushBody("  " + BOLD + WHITE + "" + mitem.name + RST, false);
     pushBody("  " + GRAY + (mitem.desc || mitem.command + " " + (mitem.args || []).join(" ")) + RST, false);
     var envKeys = Object.keys(mitem.env || {});
     if (envKeys.length > 0) {
@@ -46,7 +46,7 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
       pushBody("  " + GRAY + "No MCP servers installed." + RST, false);
       pushBody("  " + GRAY + "Switch to Marketplace to browse and install servers." + RST, false);
     } else {
-      pushBody("  " + MAGENTA + "#" + GRAY + " Installed MCP Servers (" + installedList.length + ")" + RST, false);
+      pushBody("  " + BOLD + WHITE + "Installed MCP Servers (" + installedList.length + ")" + RST, false);
       for (var i = 0; i < installedList.length; i++) {
         var m = installedList[i];
         var sel = i === S.mcpCursor;
@@ -69,7 +69,7 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
   } else {
     // Marketplace
     S.mcpItems = buildMcpList("All");
-    pushBody("  " + MAGENTA + "#" + GRAY + " MCP Marketplace (" + S.mcpItems.length + " available)" + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST), false);
+    pushBody("  " + BOLD + WHITE + "MCP Marketplace (" + S.mcpItems.length + " available)" + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST), false);
     for (var i = 0; i < S.mcpItems.length; i++) {
       var m = S.mcpItems[i];
       var sel = i === S.mcpCursor;

@@ -53,6 +53,9 @@ export function render() {
   }
   updateSpinner();
 
+  // one blank line above the footer separator for breathing room (counted in maxBody)
+  if (footLines.length) footLines.unshift("");
+
   // 3. Viewport calculation
   var maxBody = Math.max(2, totalRows - headLines.length - footLines.length);
   

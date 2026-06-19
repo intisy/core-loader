@@ -95,7 +95,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
   }
 
   if (S.mode === "pcommits") {
-    pushBody("  " + MAGENTA + "#" + GRAY + " Select commit for " + S.pluginItems[S.pcursor].name + RST, false);
+    pushBody("  " + BOLD + WHITE + "Select commit for " + S.pluginItems[S.pcursor].name + RST, false);
     for (var i = 0; i < S.commitItems.length; i++) {
       var c = S.commitItems[i];
       var sel = i === S.ccursor;
@@ -116,7 +116,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
 
   if (S.mode === "pactions" && S.pluginItems.length > 0 && S.pluginItems[S.pcursor]) {
     var ppitem = S.pluginItems[S.pcursor];
-    pushBody("  " + MAGENTA + "#" + GRAY + " " + trunc(ppitem.name, cols - 6) + RST, false);
+    pushBody("  " + BOLD + WHITE + "" + trunc(ppitem.name, cols - 6) + RST, false);
     var pinfo = ppitem.type === "npm"
       ? ("npm  " + (ppitem.version ? "v" + ppitem.version : "not installed"))
       : trunc(ppitem.subject || ppitem.url || "", cols - 6);
@@ -173,7 +173,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       var mitem = S.marketplaceItems[S.mkCursor];
       if (!mitem) { S.mkMode = "browse"; }
       else {
-        pushBody("  " + MAGENTA + "#" + GRAY + " " + trunc(mitem.name, cols - 6) + RST, false);
+        pushBody("  " + BOLD + WHITE + "" + trunc(mitem.name, cols - 6) + RST, false);
         pushBody("  " + GRAY + trunc(mitem.desc || mitem.command + " " + (mitem.args || []).join(" "), cols - 6) + RST, false);
         pushBody("", false);
         var mkActs = mitem.installed ? [] : [{ key: "install", label: "Install" }];
@@ -194,7 +194,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
         return;
       }
     }
-    pushBody("  " + MAGENTA + "#" + GRAY + " Marketplace (" + S.marketplaceItems.length + " available)" + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST), false);
+    pushBody("  " + BOLD + WHITE + "Marketplace (" + S.marketplaceItems.length + " available)" + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST), false);
     if (S.marketplaceItems.length === 0) {
       if (S.inputBuf) {
         pushBody("  " + GRAY + "No results for \"" + S.inputBuf + "\"" + RST, false);
@@ -266,7 +266,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
   }
 
   var npmCount = S.pluginItems.filter(function(p) { return p.type === "npm"; }).length;
-  pushBody("  " + MAGENTA + "#" + GRAY + " Plugins " +
+  pushBody("  " + BOLD + WHITE + "Plugins " +
       GRAY + "(" + autoCount + " auto, " + manualCount + " manual, " + disabledCount + " disabled" +
       (updateCount > 0 ? ", " + CYAN + updateCount + " updates" + GRAY : "") +
       (npmCount > 0 ? ", " + GRAY + npmCount + " npm" + GRAY : "") +
@@ -281,7 +281,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
     var pitem = S.pluginItems[i];
     if (pitem.type === "npm" && (i === 0 || S.pluginItems[i - 1].type !== "npm")) {
       pushBody("", false);
-      pushBody("  " + MAGENTA + "#" + GRAY + " npm plugins" + RST, false);
+      pushBody("  " + BOLD + WHITE + "npm plugins" + RST, false);
     }
     buildPluginItem(pushBody, i, pitem, nameW, cols, i === S.pcursor);
   }

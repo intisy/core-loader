@@ -41,7 +41,7 @@ export function messageLine(cols) {
 }
 
 export function buildConfirm(pushBody, pushFoot, cols, barW) {
-  pushBody("  " + MAGENTA + "#" + GRAY + " Confirm" + RST, false);
+  pushBody("  " + BOLD + WHITE + "Confirm" + RST, false);
   pushBody("", false);
   pushBody("  " + BOLD + WHITE + trunc(S.confirmLabel, cols - 4) + RST, false);
   pushBody("", false);
@@ -60,7 +60,7 @@ export function buildConfirm(pushBody, pushFoot, cols, barW) {
 
 export function buildHelp(pushBody, pushFoot, cols, barW) {
   var binds = HELP_BINDINGS[S.page] || [];
-  pushBody("  " + MAGENTA + "#" + GRAY + " Keyboard shortcuts" + RST, false);
+  pushBody("  " + BOLD + WHITE + "Keyboard shortcuts" + RST, false);
   pushBody("", false);
   for (var i = 0; i < binds.length; i++) {
     pushBody("    " + BOLD + WHITE + pad(binds[i][0], 16) + RST + GRAY + binds[i][1] + RST, false);
