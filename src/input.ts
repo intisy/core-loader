@@ -790,7 +790,12 @@ export function handleTabInputData(buf) {
   else if (buf[0] === 13 || buf[0] === 10) key = "enter";
   else if (buf[0] === 9) key = "tab";
   else if (buf[0] === 127 || buf[0] === 8) key = "backspace";
-  else if (buf[0] >= 32 && buf[0] < 127) key = String.fromCharCode(buf[0]);
+  else if (buf[0] >= 32 && buf[0] < 127) {
+    // collect the whole printable run so a PASTE (multi-byte, e.g. a long redirect
+    // URL) arrives as one key instead of just the first character
+    var s = ""; for (var bi = 0; bi < buf.length; bi++) { var c = buf[bi]; if (c >= 32 && c < 127) s += String.fromCharCode(c); }
+    if (!s) return; key = s;
+  }
   else return;
   try { activeTab.handleKey(key, { pluginSubPage: S.pluginSubPage, mode: S.mode }, tuiApi); } catch(e) {}
 }
