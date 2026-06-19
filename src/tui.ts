@@ -122,7 +122,12 @@ function runBlocking(fn) {
   try { process.stdin.setRawMode(false); } catch {}
   try { process.stdin.pause(); } catch {}
   showCur();
+  // Pausing stdin drops the last event-loop ref. If fn awaits async work that
+  // doesn't itself touch stdin (e.g. an input-action's PKCE digest / fetch),
+  // the loop would otherwise idle-exit (code 0) before fn settles. Hold it open.
+  var keepAlive = setInterval(function() {}, 1 << 30);
   return Promise.resolve().then(fn).catch(function() {}).then(function() {
+    clearInterval(keepAlive);
     try { process.stdin.setRawMode(true); } catch {}
     try { process.stdin.resume(); } catch {}
     process.stdin.on("data", onData);
