@@ -40,6 +40,14 @@ export const S = {
   ccursor: 0,
   cscrollOff: 0,
 
+  // Plugin config editor (Plugins tab -> Configure). Detected per-plugin by probing
+  // its deployed bundle with `config schema`; editing writes via `config set`.
+  configItems: [],
+  cfgcursor: 0,
+  cfgScrollOff: 0,
+  configTarget: null,
+  configEditKey: "",
+
   // MCP page
   mcpItems: [],
   mcpCursor: 0,

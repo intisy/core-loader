@@ -114,6 +114,37 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
     return;
   }
 
+  if (S.mode === "pconfig" || S.mode === "pcfginput") {
+    var ct = S.configTarget;
+    var cname = (ct && ct.name) || "";
+    pushBody("  " + MAGENTA + "#" + GRAY + " Configure " + WHITE + trunc(cname, cols - 16) + RST, false);
+    pushBody("  " + GRAY + "changes save to config/" + cname + ".json (restart to apply)" + RST, false);
+    pushBody("", false);
+    var keyW = 6;
+    for (var ck = 0; ck < S.configItems.length; ck++) keyW = Math.max(keyW, stringWidth(S.configItems[ck].key));
+    keyW = Math.min(keyW, Math.max(12, Math.floor(cols / 2)));
+    for (var ci = 0; ci < S.configItems.length; ci++) {
+      var it = S.configItems[ci];
+      var csel = ci === S.cfgcursor;
+      var editing = S.mode === "pcfginput" && csel;
+      var valStr;
+      if (editing) valStr = BG_SEL + " " + S.inputBuf + BOLD + "|" + RST;
+      else if (it.type === "boolean") valStr = (it.value ? GREEN + "true" : RED + "false") + RST;
+      else valStr = WHITE + JSON.stringify(it.value) + RST;
+      var mark = it.isSet ? "" : (GRAY + " (default)" + RST);
+      var carrow = csel ? (YELLOW + " > " + RST) : "   ";
+      var cbg = csel ? BG_SEL : "";
+      var cNameStyle = csel ? (BOLD + WHITE) : DIM;
+      pushBody("  " + cbg + carrow + cNameStyle + pad(trunc(it.key, keyW), keyW) + RST + cbg + "  " + valStr + mark + RST, csel);
+    }
+    pushBody("", false);
+    if (S.message) pushFoot(messageLine(cols));
+    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+    if (S.mode === "pcfginput") pushFoot(hints([["Enter", "Save"], ["Esc", "Cancel"]]));
+    else pushFoot(hints([["^v/WS", "Move"], ["Enter", "Edit/Toggle"], ["Esc", "Back"]]));
+    return;
+  }
+
   if (S.mode === "pactions" && S.pluginItems.length > 0 && S.pluginItems[S.pcursor]) {
     var ppitem = S.pluginItems[S.pcursor];
     pushBody("  " + BOLD + WHITE + "" + trunc(ppitem.name, cols - 6) + RST, false);

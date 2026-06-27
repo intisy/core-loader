@@ -12,7 +12,7 @@ import { cleanup } from "./out.js";
 import { loadConfig, saveConfig, loadPlugins, savePlugins } from "./config.js";
 import { getUpdater, setupPlugin } from "./updater.js";
 import { openProject, togglePin, hideItem, unhideAll, changeProjectPath, outputDir, getActions } from "./projects.js";
-import { getPluginActions, buildCombinedPluginList, fetchPluginRemotes } from "./plugins.js";
+import { getPluginActions, buildCombinedPluginList, fetchPluginRemotes, probeConfigSchema, buildConfigItems, setPluginConfig } from "./plugins.js";
 import { buildMarketplaceList, installMarketplacePlugin, invalidateCatalogCache, fetchCatalogsAsync } from "./marketplace.js";
 import { getInstalledMcpList, buildMcpList, installMcpServer, uninstallMcpServer, getMcpActions } from "./mcp.js";
 import { flash } from "./views/common.js";
@@ -171,7 +171,12 @@ export function handlePluginKey(key) {
       if (key === "up" || key === "w") { S.pcursor = Math.max(0, S.pcursor - 1); }
       else if (key === "down" || key === "s") { S.pcursor = Math.min(S.pluginItems.length - 1, S.pcursor + 1); }
       else if (key === "enter" || key === "space") {
-        if (S.pluginItems.length > 0) { S.mode = "pactions"; S.pacursor = 0; }
+        if (S.pluginItems.length > 0) {
+          var selp = S.pluginItems[S.pcursor];
+          // detect a core-plugin once (so getPluginActions can offer "Configure")
+          if (selp && selp._cfgProbed !== true) { selp._cfg = probeConfigSchema(selp); selp._cfgProbed = true; }
+          S.mode = "pactions"; S.pacursor = 0;
+        }
       }
       else if (key === "r") {
         S.pluginItems = buildCombinedPluginList();
@@ -406,6 +411,17 @@ export function handlePluginKey(key) {
           render();
         });
       }
+      else if (action === "configure") {
+        var cfg = pitem._cfg;
+        if (cfg && cfg.items && cfg.items.length) {
+          S.configTarget = cfg;
+          S.configItems = cfg.items;
+          S.cfgcursor = 0; S.cfgScrollOff = 0;
+          S.mode = "pconfig";
+        } else {
+          flash("No configurable settings."); S.mode = "list";
+        }
+      }
       else if (action === "commits") {
         var dir = join(REPOS_DIR, pitem.folderName);
         if (!existsSync(dir)) { flash("Not installed locally yet"); S.mode = "list"; return; }
@@ -432,6 +448,24 @@ export function handlePluginKey(key) {
       else { S.mode = "list"; }
     }
     else if (key === "escape" || key === "q" || key === "left") { S.mode = "list"; }
+  } else if (S.mode === "pconfig") {
+    var citem = S.configItems[S.cfgcursor];
+    if (key === "up" || key === "w") { S.cfgcursor = Math.max(0, S.cfgcursor - 1); }
+    else if (key === "down" || key === "s") { S.cfgcursor = Math.min(S.configItems.length - 1, S.cfgcursor + 1); }
+    else if (key === "escape" || key === "q" || key === "left") { S.mode = "pactions"; }
+    else if ((key === "enter" || key === "space") && citem) {
+      if (citem.type === "boolean") {
+        // booleans toggle in place — no typing
+        var nv = !citem.value;
+        var berr = setPluginConfig(S.configTarget.bundle, citem.key, nv ? "true" : "false");
+        if (berr) { flash(citem.key + ": " + berr); }
+        else { refreshConfigItems(); flash(citem.key + " = " + nv + " (restart to apply)"); }
+      } else {
+        S.configEditKey = citem.key;
+        S.inputBuf = (citem.value === undefined || citem.value === null) ? "" : String(citem.value);
+        S.mode = "pcfginput";
+      }
+    }
   } else if (S.mode === "confirm") {
     if (key === "y") {
       if (S.confirmAction && S.confirmAction.type === "uninstall-plugin") {
@@ -746,6 +780,37 @@ export function handleSearchData(buf) {
     if (S.page === "plugins") { S.marketplaceItems = buildMarketplaceList(); S.mkCursor = 0; }
     else if (S.page === "mcp") { S.mcpItems = buildMcpList("All"); S.mcpCursor = 0; }
   }
+}
+
+// Re-read a plugin's config schema after a change so the editor shows fresh values.
+function refreshConfigItems() {
+  if (!S.configTarget) return;
+  try {
+    var out = execSync('node "' + S.configTarget.bundle + '" config schema', { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] });
+    var data = JSON.parse(String(out).trim());
+    S.configItems = buildConfigItems(data);
+    S.configTarget.items = S.configItems;
+  } catch { /* keep stale view */ }
+  if (S.cfgcursor >= S.configItems.length) S.cfgcursor = Math.max(0, S.configItems.length - 1);
+}
+
+// Free-text entry for a non-boolean config value; Enter saves via `config set`.
+export function handleConfigInputData(buf) {
+  if (buf[0] === 27) { S.inputBuf = ""; S.mode = "pconfig"; return; }   // esc cancels
+  if (buf[0] === 13 || buf[0] === 10) {
+    var val = S.inputBuf;
+    var key = S.configEditKey;
+    S.inputBuf = "";
+    S.mode = "pconfig";
+    if (S.configTarget && key) {
+      var serr = setPluginConfig(S.configTarget.bundle, key, val);
+      if (serr) flash(key + ": " + serr);
+      else { refreshConfigItems(); flash(key + " saved (restart to apply)."); }
+    }
+    return;
+  }
+  if (buf[0] === 127 || buf[0] === 8) { S.inputBuf = S.inputBuf.slice(0, -1); return; }
+  if (buf[0] >= 32 && buf[0] <= 126) S.inputBuf += String.fromCharCode(buf[0]);
 }
 
 export function handlePluginInputData(buf) {

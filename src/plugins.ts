@@ -148,6 +148,11 @@ export function getPluginActions(pitem) {
     a.push({ key: "cancel", label: "Cancel" });
     return a;
   }
+  // Configure: shown only for plugins that use our core (their bundle answers
+  // `config schema`). Probed + cached on the item when the action menu opens.
+  if (pitem._cfg && pitem._cfg.items && pitem._cfg.items.length) {
+    a.push({ cat: "Configure", key: "configure", label: "Configure settings (" + pitem._cfg.items.length + ")" });
+  }
   if (pitem.updateAvail || !pitem.deployed) {
     a.push({ cat: "Update", key: "update", label: "Update now" });
   }
@@ -165,5 +170,44 @@ export function getPluginActions(pitem) {
   a.push({ cat: "Manage", key: "uninstall-plugin", label: "Uninstall plugin" });
   a.push({ key: "cancel", label: "Cancel" });
   return a;
+}
+
+// Probe a deployed plugin bundle for its config schema. A plugin built on our core
+// answers `node <bundle> config schema` with {name, defaults, current}; anything else
+// (non-core plugins, npm engine row, parse error) yields null -> no Configure action.
+export function probeConfigSchema(pitem) {
+  if (!pitem || pitem.type === "npm" || !pitem.deployed) return null;
+  var bundle = join(PLUGINS_DIR, (pitem.pluginFile || pitem.name + ".js"));
+  if (!existsSync(bundle)) return null;
+  try {
+    var out = execSync('node "' + bundle + '" config schema', { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] });
+    var data = JSON.parse(String(out).trim());
+    if (!data || typeof data !== "object") return null;
+    var items = buildConfigItems(data);
+    if (!items.length) return null;
+    return { name: data.name || pitem.name, bundle: bundle, items: items };
+  } catch { return null; }
+}
+
+// Flatten a schema into editable rows: every key (declared default or on-disk),
+// its effective value, whether it is explicitly set, and its inferred type.
+export function buildConfigItems(schema) {
+  var defaults = (schema && schema.defaults) || {};
+  var current = (schema && schema.current) || {};
+  var merged = Object.assign({}, defaults, current);
+  return Object.keys(merged).map(function (k) {
+    var isSet = Object.prototype.hasOwnProperty.call(current, k);
+    var value = isSet ? current[k] : defaults[k];
+    return { key: k, value: value, def: defaults[k], isSet: isSet, type: typeof value };
+  });
+}
+
+// Persist one setting by shelling back into the plugin's own config CLI — `config set`
+// is the only thing that writes a file, so a config appears only once actually changed.
+export function setPluginConfig(bundle, key, valueStr) {
+  try {
+    execSync('node "' + bundle + '" config set ' + JSON.stringify(key) + ' ' + JSON.stringify(String(valueStr)), { timeout: 8000, stdio: ["ignore", "ignore", "ignore"] });
+    return "";
+  } catch (e) { return (e && e.message) || "set failed"; }
 }
 
