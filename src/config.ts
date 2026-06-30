@@ -4,8 +4,69 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
-import { CONFIG_PATH, CONFIG_FOLDER, CONFIG_DIR, PLUGINS_JSON, MCP_CONFIG_PATH } from "./env.js";
+import { CONFIG_PATH, CONFIG_FOLDER, CONFIG_DIR, CLI_CMD, PLUGINS_JSON, MCP_CONFIG_PATH } from "./env.js";
 import { getUpdater } from "./updater.js";
+
+// ── Loader plugin config (config/<loaderName>.json) ─────────────────────────
+// The active loader's OWN plugin config — the same file the loader's plugin.ts
+// registers via defineConfig (opencode-loader.json / claude-code-loader.json).
+// The TUI reads it for the runtime knobs below. Returns {} when no file exists,
+// so every getter falls back to the default that reproduces current behavior.
+//
+// Loader name is derived from CLI_CMD (HUB_CLI_CMD) which the wrapper always
+// sets: "opencode" -> opencode-loader, "claude" -> claude-code-loader. When the
+// env is ambiguous (CLI_CMD unrecognized), fall back to whichever of the two
+// config files actually exists on disk.
+var LOADER_CONFIG = null;
+
+function loaderName() {
+  var cmd = String(CLI_CMD || "");
+  if (cmd.indexOf("opencode") !== -1) return "opencode-loader";
+  if (cmd.indexOf("claude") !== -1) return "claude-code-loader";
+  // ambiguous: pick the loader whose config file exists (preferred then fallback)
+  var candidates = ["opencode-loader", "claude-code-loader"];
+  for (var i = 0; i < candidates.length; i++) {
+    if (existsSync(join(CONFIG_FOLDER, candidates[i] + ".json"))) return candidates[i];
+    if (existsSync(join(CONFIG_DIR, candidates[i] + ".json"))) return candidates[i];
+  }
+  return "opencode-loader";
+}
+
+export function loadLoaderConfig() {
+  if (LOADER_CONFIG !== null) return LOADER_CONFIG;
+  var name = loaderName();
+  var preferred = join(CONFIG_FOLDER, name + ".json");
+  var fallback = join(CONFIG_DIR, name + ".json");
+  try {
+    var p = existsSync(preferred) ? preferred : existsSync(fallback) ? fallback : null;
+    LOADER_CONFIG = p ? (JSON.parse(readFileSync(p, "utf-8")) || {}) : {};
+  } catch { LOADER_CONFIG = {}; }
+  return LOADER_CONFIG;
+}
+
+// Getters with defaults that reproduce CURRENT behavior exactly when unset.
+function num(v, fallback) {
+  var n = Number(v);
+  return (v != null && !isNaN(n)) ? n : fallback;
+}
+
+export function autoUpdateCheck() {
+  return loadLoaderConfig().auto_update_check !== false;   // default true
+}
+export function updateCheckDelayMs() {
+  return num(loadLoaderConfig().update_check_delay_ms, 1500);
+}
+export function updateCheckIntervalHours() {
+  return num(loadLoaderConfig().update_check_interval_hours, 24);
+}
+export function catalogCacheHours() {
+  return num(loadLoaderConfig().catalog_cache_hours, 6);
+}
+export function defaultTab() {
+  var t = loadLoaderConfig().default_tab;
+  // validate against the real page names; fall back to "projects" if invalid
+  return (t === "projects" || t === "plugins" || t === "mcp") ? t : "projects";
+}
 
 export function loadConfig() {
   try { if (existsSync(CONFIG_PATH)) return JSON.parse(readFileSync(CONFIG_PATH, "utf-8")); } catch {}

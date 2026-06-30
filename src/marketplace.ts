@@ -7,7 +7,7 @@ import { join, dirname } from "path";
 import { exec, execSync } from "child_process";
 import { CATALOG_CACHE_PATH, CACHE_DIR, MCP_CATALOG, APP_NAME, REPOS_DIR, tuiLog } from "./env.js";
 import { S } from "./state.js";
-import { loadPlugins, savePlugins } from "./config.js";
+import { loadPlugins, savePlugins, catalogCacheHours } from "./config.js";
 import { scheduleRender } from "./views/common.js";
 import { buildMcpList } from "./mcp.js";
 
@@ -19,7 +19,7 @@ export function loadCatalogCache() {
   try {
     if (!existsSync(CATALOG_CACHE_PATH)) return false;
     var cached = JSON.parse(readFileSync(CATALOG_CACHE_PATH, "utf-8"));
-    if (!cached || Date.now() - cached.time > 6 * 3600000) return false;
+    if (!cached || Date.now() - cached.time > catalogCacheHours() * 3600000) return false;
     if (!Array.isArray(cached.marketplace) || cached.marketplace.length === 0) return false;
     for (var ce of cached.marketplace) S.MARKETPLACE_CATALOG.push(ce);
     for (var me of (cached.mcp || [])) {

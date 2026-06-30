@@ -10,7 +10,7 @@ import { S } from "./state.js";
 import { APP_NAME, CLI_CMD, NPM_PKG, CONFIG_DIR, CACHE_DIR, UPDATE_CHECK_PATH, REPOS_DIR, PLUGINS_DIR, tuiLog } from "./env.js";
 import { hideCur, showCur, cleanup } from "./out.js";
 import { getFolderName } from "./updater.js";
-import { loadConfig, saveConfig, migrateConfigs, loadPlugins } from "./config.js";
+import { loadConfig, saveConfig, migrateConfigs, loadPlugins, autoUpdateCheck, updateCheckDelayMs, updateCheckIntervalHours, defaultTab } from "./config.js";
 import { flash } from "./views/common.js";
 import { buildMcpList } from "./mcp.js";
 import { buildMarketplaceList } from "./marketplace.js";
@@ -70,7 +70,7 @@ function checkForUpdates() {
     }
     if (existsSync(UPDATE_CHECK_PATH)) {
       var lastCheck = parseInt(readFileSync(UPDATE_CHECK_PATH, "utf-8").trim(), 10);
-      if (Date.now() - lastCheck < 86400000) return;
+      if (Date.now() - lastCheck < updateCheckIntervalHours() * 3600000) return;
     }
 
     if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
@@ -95,7 +95,7 @@ function checkForUpdates() {
 }
 
 // deferred so the TUI renders immediately instead of waiting on version checks
-setTimeout(checkForUpdates, 1500);
+if (autoUpdateCheck()) setTimeout(checkForUpdates, updateCheckDelayMs());
 
 
 // Registry Pattern: plugins extend the TUI by exporting a function from tui-extension.js
@@ -252,6 +252,10 @@ loadCustomTabs();
 if (process.env.HUB_OPEN_TAB) {
   S.page = "plugins";
   S.pluginSubPage = process.env.HUB_OPEN_TAB;
+} else {
+  // honor the configured initial tab (validated; defaults to "projects" =
+  // current behavior) only when the wrapper hasn't forced a tab via env
+  S.page = defaultTab();
 }
 
 // disable any mouse reporting a previous program left enabled — pointer
