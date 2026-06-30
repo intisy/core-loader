@@ -9,7 +9,7 @@ import { RST, BOLD, WHITE, RED } from "./format.js";
 import { APP_NAME, CONFIG_DIR, HOME, PLUGINS_DIR, REPOS_DIR, MCP_CONFIG_PATH } from "./env.js";
 import { S } from "./state.js";
 import { cleanup } from "./out.js";
-import { loadConfig, saveConfig, loadPlugins, savePlugins } from "./config.js";
+import { loadConfig, saveConfig, loadPlugins, savePlugins, loadGlobalSettings, setGlobalSetting, GLOBAL_SETTINGS_DEFAULTS } from "./config.js";
 import { getUpdater, setupPlugin } from "./updater.js";
 import { openProject, togglePin, hideItem, unhideAll, changeProjectPath, outputDir, getActions } from "./projects.js";
 import { getPluginActions, buildCombinedPluginList, fetchPluginRemotes, probeConfigSchema, buildConfigItems, setPluginConfig } from "./plugins.js";
@@ -457,7 +457,9 @@ export function handlePluginKey(key) {
       if (citem.type === "boolean") {
         // booleans toggle in place — no typing
         var nv = !citem.value;
-        var berr = setPluginConfig(S.configTarget.bundle, citem.key, nv ? "true" : "false");
+        var berr = S.configTarget.global
+          ? setGlobalSetting(citem.key, nv ? "true" : "false")
+          : setPluginConfig(S.configTarget.bundle, citem.key, nv ? "true" : "false");
         if (berr) { flash(citem.key + ": " + berr); }
         else { refreshConfigItems(); flash(citem.key + " = " + nv + " (restart to apply)"); }
       } else {
@@ -785,12 +787,17 @@ export function handleSearchData(buf) {
 // Re-read a plugin's config schema after a change so the editor shows fresh values.
 function refreshConfigItems() {
   if (!S.configTarget) return;
-  try {
-    var out = execSync('node "' + S.configTarget.bundle + '" config schema', { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] });
-    var data = JSON.parse(String(out).trim());
-    S.configItems = buildConfigItems(data);
+  if (S.configTarget.global) {
+    S.configItems = buildConfigItems({ defaults: GLOBAL_SETTINGS_DEFAULTS, current: loadGlobalSettings() });
     S.configTarget.items = S.configItems;
-  } catch { /* keep stale view */ }
+  } else {
+    try {
+      var out = execSync('node "' + S.configTarget.bundle + '" config schema', { encoding: "utf-8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] });
+      var data = JSON.parse(String(out).trim());
+      S.configItems = buildConfigItems(data);
+      S.configTarget.items = S.configItems;
+    } catch { /* keep stale view */ }
+  }
   if (S.cfgcursor >= S.configItems.length) S.cfgcursor = Math.max(0, S.configItems.length - 1);
 }
 
@@ -803,7 +810,7 @@ export function handleConfigInputData(buf) {
     S.inputBuf = "";
     S.mode = "pconfig";
     if (S.configTarget && key) {
-      var serr = setPluginConfig(S.configTarget.bundle, key, val);
+      var serr = S.configTarget.global ? setGlobalSetting(key, val) : setPluginConfig(S.configTarget.bundle, key, val);
       if (serr) flash(key + ": " + serr);
       else { refreshConfigItems(); flash(key + " saved (restart to apply)."); }
     }

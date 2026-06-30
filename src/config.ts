@@ -21,6 +21,39 @@ export function saveConfig(cfg) {
   } catch {}
 }
 
+// ── Global ecosystem settings (config/settings.json) ────────────────────────
+// The shared, app-wide settings every plugin reads via core's globalSetting(). The
+// loader edits this file DIRECTLY (plain JSON, like plugins.json) so the Configure
+// editor can manage global settings with no plugin bundle / no agent. Defaults mirror
+// core's GLOBAL_SETTINGS_DEFAULTS — keep in sync if core adds global keys.
+var GLOBAL_SETTINGS_FILE = join(CONFIG_FOLDER, "settings.json");
+export var GLOBAL_SETTINGS_DEFAULTS = { logConsole: false, logColor: true };
+
+export function loadGlobalSettings() {
+  try { if (existsSync(GLOBAL_SETTINGS_FILE)) return JSON.parse(readFileSync(GLOBAL_SETTINGS_FILE, "utf-8")) || {}; } catch {}
+  return {};
+}
+
+// parse a CLI/edit string into the obvious type (mirrors core's coerce)
+function coerceGlobal(v) {
+  if (v === "true") return true;
+  if (v === "false") return false;
+  if (v === "null") return null;
+  if (v !== "" && !isNaN(Number(v))) return Number(v);
+  if (/^[[{]/.test(String(v).trim())) { try { return JSON.parse(v); } catch {} }
+  return v;
+}
+
+export function setGlobalSetting(key, valueStr) {
+  try {
+    var cur = loadGlobalSettings();
+    cur[key] = coerceGlobal(valueStr);
+    if (!existsSync(CONFIG_FOLDER)) mkdirSync(CONFIG_FOLDER, { recursive: true });
+    writeFileSync(GLOBAL_SETTINGS_FILE, JSON.stringify(cur, null, 2));
+    return "";
+  } catch (e) { return (e && e.message) || "set failed"; }
+}
+
 export function migrateConfigs() {
   if (!existsSync(CONFIG_FOLDER)) try { mkdirSync(CONFIG_FOLDER, { recursive: true }); } catch {}
   var legacyConfig = join(CONFIG_DIR, "oc-config.json");

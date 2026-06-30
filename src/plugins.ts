@@ -6,7 +6,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 import { REPOS_DIR, PLUGINS_DIR } from "./env.js";
-import { loadPlugins } from "./config.js";
+import { loadPlugins, loadGlobalSettings, GLOBAL_SETTINGS_DEFAULTS } from "./config.js";
 import { getFolderName, loadNpmPlugins, getUpdater, getUpdaterVersion } from "./updater.js";
 
 export function gitText(args, cwd) {
@@ -124,11 +124,27 @@ export function buildCombinedPluginList() {
       pluginFile: ""
     });
   }
-  return git.concat(npm);
+  // Global ecosystem settings, shown first as a configurable pseudo-item (edited in
+  // place via config/settings.json — no plugin bundle, no agent). See probeConfigSchema.
+  var globalItem = {
+    type: "global", global: true, engine: false,
+    name: "Global settings", subject: "ecosystem-wide (config/settings.json)",
+    enabled: true, deployed: true, installed: true, autoUpdate: false, updateAvail: false,
+    version: "", localHead: "", remoteHead: "", latestTag: "", folderName: "", url: "",
+    hasBuild: false, pluginFile: "",
+  };
+  return [globalItem].concat(git).concat(npm);
 }
 
 export function getPluginActions(pitem) {
   var a = [];
+  if (pitem.global) {
+    if (pitem._cfg && pitem._cfg.items && pitem._cfg.items.length) {
+      a.push({ cat: "Configure", key: "configure", label: "Configure global settings (" + pitem._cfg.items.length + ")" });
+    }
+    a.push({ key: "cancel", label: "Cancel" });
+    return a;
+  }
   if (pitem.engine) {
     a.push({ key: "updater-update", label: "Update plugin-updater" });
     a.push({ key: "updater-run", label: "Update all plugins (early launch)" });
@@ -176,6 +192,11 @@ export function getPluginActions(pitem) {
 // answers `node <bundle> config schema` with {name, defaults, current}; anything else
 // (non-core plugins, npm engine row, parse error) yields null -> no Configure action.
 export function probeConfigSchema(pitem) {
+  // Global settings are read/written directly from config/settings.json (no bundle).
+  if (pitem && pitem.global) {
+    var gitems = buildConfigItems({ defaults: GLOBAL_SETTINGS_DEFAULTS, current: loadGlobalSettings() });
+    return gitems.length ? { name: "settings", global: true, items: gitems } : null;
+  }
   if (!pitem || pitem.type === "npm" || !pitem.deployed) return null;
   var bundle = join(PLUGINS_DIR, (pitem.pluginFile || pitem.name + ".js"));
   if (!existsSync(bundle)) return null;
