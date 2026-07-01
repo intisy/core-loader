@@ -577,14 +577,16 @@ export function handlePluginKey(key) {
       flash("Downgrading " + pitem.name + " to " + citem.hash + "...");
       render();
       
-      var err = "Updater plugin not found";
+      var err = "";
       var updater = getUpdater();
-      if (updater) {
+      // Prefer the updater's downgrade() when the deployed bundle actually exposes
+      // it; otherwise (older updater without the method) check the commit out
+      // directly in the repo clone. Guarding the typeof avoids a crash when it's absent.
+      if (updater && typeof updater.downgrade === "function") {
         var plugins = loadPlugins();
         var repo = plugins.find(function(r) { return r.name === pitem.name; });
-        if (repo) err = updater.downgrade(repo, citem.hash);
+        err = repo ? updater.downgrade(repo, citem.hash) : "plugin not found";
       } else {
-        // fallback
         var dir = join(REPOS_DIR, pitem.folderName);
         try {
           execSync("git reset --hard", { cwd: dir, timeout: 15000, stdio: "ignore" });

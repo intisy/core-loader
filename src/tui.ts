@@ -305,7 +305,13 @@ function onData(buf) {
   if (S.mode === "search") { handleSearchData(buf); render(); return; }
   if (S.mode === "tabinput") { handleTabInputData(buf); render(); return; }
   var key = parseKey(buf);
-  if (key) { handleKey(key); render(); }
+  if (key) {
+    // Never let a handler error crash the whole TUI: surface it as a status
+    // message and keep the loop alive so the user stays in their menu.
+    try { handleKey(key); }
+    catch (e) { try { flash("Error: " + ((e && e.message) || e)); } catch (_) {} }
+    render();
+  }
 }
 process.stdin.on("data", onData);
 // @ts-nocheck

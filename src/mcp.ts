@@ -8,7 +8,12 @@ import { HOME, MCP_CATALOG } from "./env.js";
 import { loadMcpConfig, saveMcpConfig } from "./config.js";
 import { fetchCatalogsAsync } from "./marketplace.js";
 
+// Cached once per session: the scan does readdirSync + many reads across the repos
+// and plugin-cache dirs, which made every MCP render (buildMcpList) hit disk and lag
+// navigation. Embedded MCPs change only when plugins are added/removed (restart re-scans).
+var EMBEDDED_MCP_CACHE = null;
 export function scanPluginEmbeddedMcps() {
+  if (EMBEDDED_MCP_CACHE !== null) return EMBEDDED_MCP_CACHE;
   var embedded = {};
   var baseMcpNames = {};
 
@@ -96,6 +101,7 @@ export function scanPluginEmbeddedMcps() {
   scanPluginCache(join(ocDir, "plugins", "cache"));
 
   embedded._baseMcpNames = baseMcpNames;
+  EMBEDDED_MCP_CACHE = embedded;
   return embedded;
 }
 

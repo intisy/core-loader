@@ -153,16 +153,24 @@ export function savePlugins(plugins) {
   writeFileSync(target, JSON.stringify(plugins, null, 2), "utf-8");
 }
 
+// Cached parsed MCP config so the MCP views (which read it every render) never hit
+// disk during navigation. Invalidated when saveMcpConfig writes.
+var MCP_CONFIG_CACHE = null;
+
 export function loadMcpConfig() {
+  if (MCP_CONFIG_CACHE !== null) return MCP_CONFIG_CACHE;
+  var out = { mcpServers: {} };
   try {
-    if (existsSync(MCP_CONFIG_PATH)) return JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
+    if (existsSync(MCP_CONFIG_PATH)) out = JSON.parse(readFileSync(MCP_CONFIG_PATH, "utf-8"));
   } catch {}
-  return { mcpServers: {} };
+  MCP_CONFIG_CACHE = out;
+  return out;
 }
 
 export function saveMcpConfig(config) {
   try {
     if (!existsSync(dirname(MCP_CONFIG_PATH))) mkdirSync(dirname(MCP_CONFIG_PATH), { recursive: true });
     writeFileSync(MCP_CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+    MCP_CONFIG_CACHE = null;   // next read reflects the write
   } catch {}
 }
