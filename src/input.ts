@@ -81,6 +81,10 @@ export function handleProjectKey(key) {
 
 export function handlePluginKey(key) {
   if (S.mode === "list") {
+    // Esc backs out of the marketplace action menu (it keeps S.mode === "list"
+    // and tracks its own S.mkMode) instead of quitting the loader; only the
+    // top-level list quits on Esc. `q` always quits.
+    if (key === "escape" && S.pluginSubPage === "marketplace" && S.mkMode === "actions") { S.mkMode = "browse"; return; }
     if (key === "q" || key === "escape") { cleanup(); process.exit(1); return; }
     
     if (key === "tab") {
