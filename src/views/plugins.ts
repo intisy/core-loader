@@ -79,7 +79,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
 
   if (!hasUpdater) {
     if (process.env.CC_LAUNCHER === "1") {
-      pushBody("  " + BOLD + RED + "Updater Plugin Missing" + RST, false);
+      pushBody("  " + BOLD + BAD + "Updater Plugin Missing" + RST, false);
       pushBody("  The hub requires an updater plugin to manage installations.", false);
       pushBody("", false);
       pushBody("  Press " + BOLD + WHITE + "Enter" + RST + " to install the default updater plugin.", false);
@@ -90,7 +90,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       return;
     } else {
       // OC mode: same interactive install prompt as CC mode
-      pushBody("  " + BOLD + RED + "Updater Plugin Missing" + RST, false);
+      pushBody("  " + BOLD + BAD + "Updater Plugin Missing" + RST, false);
       pushBody("  The hub requires an updater plugin to manage installations.", false);
       pushBody("", false);
       pushBody("  Press " + BOLD + WHITE + "Enter" + RST + " to install the default updater plugin.", false);
@@ -318,6 +318,9 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
         BOLD: BOLD, WHITE: WHITE, BG_SEL: BG_SEL, RST: RST,
         GRAY: GRAY, DIM: DIM, YELLOW: YELLOW, GREEN: GREEN,
         MAGENTA: MAGENTA, CYAN: CYAN, RED: RED,
+        // palette tokens so custom tabs (e.g. the Providers tab) match the theme:
+        // ACCENT = the per-loader accent, OK/BAD = muted status tones.
+        ACCENT: ACCENT, OK: OK, BAD: BAD,
         barW: barW
       });
     } catch(e) {}

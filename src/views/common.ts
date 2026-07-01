@@ -37,7 +37,7 @@ export function updateSpinner() {
 
 export function messageLine(cols) {
   var prefix = S.message.indexOf("...") !== -1 ? spinnerFrame() + " " : "  ";
-  return "  " + GREEN + prefix + trunc(S.message, cols - 6) + RST;
+  return "  " + ACCENT + prefix + trunc(S.message, cols - 6) + RST;
 }
 
 export function buildConfirm(pushBody, pushFoot, cols, barW) {

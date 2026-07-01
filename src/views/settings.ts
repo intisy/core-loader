@@ -63,7 +63,7 @@ export function buildSettings(pushBody, pushFoot, cols, barW) {
       var bg = sel ? BG_SEL : "";
       var nameStyle = sel ? (BOLD + WHITE) : DIM;
       var valStr;
-      if (it.type === "boolean") valStr = (it.value ? GREEN + "true" : RED + "false") + RST;
+      if (it.type === "boolean") valStr = (it.value ? OK + "true" : GRAY + "false") + RST;
       else valStr = WHITE + JSON.stringify(it.value) + RST;
       var mark = it.isSet ? "" : (GRAY + " (default)" + RST);
       pushBody("  " + bg + arrow + nameStyle + pad(trunc(it.key, keyW), keyW) + RST + bg + "  " + valStr + mark + RST, sel);

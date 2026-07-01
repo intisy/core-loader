@@ -53,7 +53,7 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
         var arrow = sel ? (ACCENT + " \u276f " + RST) : "   ";
         var bg = sel ? BG_SEL : "";
         var nameStyle = sel ? (BOLD + WHITE) : DIM;
-        pushBody("  " + bg + arrow + GREEN + "\u25cf" + RST + " " + nameStyle + pad(trunc(m.name, nameW), nameW) + RST + bg + "  " + GRAY + m.command + " " + (m.args || []).join(" ") + RST, sel);
+        pushBody("  " + bg + arrow + DIM + "\u25cf" + RST + " " + nameStyle + pad(trunc(m.name, nameW), nameW) + RST + bg + "  " + GRAY + m.command + " " + (m.args || []).join(" ") + RST, sel);
         if (sel) {
           var ek = Object.keys(m.env || {});
           if (ek.length > 0) pushBody("  " + GRAY + "     env: " + ek.join(", ") + RST, sel);
