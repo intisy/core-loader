@@ -3,6 +3,7 @@
 // marketplace / custom sub-pages, and the action/commit menus.
 
 import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, MAGENTA, BG_SEL, stringWidth, pad, trunc } from "../format.js";
+import { selectionKey } from "../selection.js";
 import { S } from "../state.js";
 import { loadPlugins } from "../config.js";
 import { loadNpmPlugins, getUpdater } from "../updater.js";
@@ -261,14 +262,18 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       // official badge "◆ " occupies 2 chars; non-official gets 2 spaces to keep columns aligned
       var officialBadge = mitem.official ? (MAGENTA + "◆ " + RST) : "  ";
       var officialBadgeW = 2;
-      var usedW = 2 + 3 + 2 + officialBadgeW + mkNameW + 2 + starVis;
+      // 4-char selection slot, kept aligned on every row
+      var checkbox = mitem.installed ? "    "
+        : (S.mkSelected[selectionKey(mitem)] ? (GREEN + "[x] " + RST) : (GRAY + "[ ] " + RST));
+      var checkboxW = 4;
+      var usedW = 2 + 3 + checkboxW + 2 + officialBadgeW + mkNameW + 2 + starVis;
       var descW = Math.max(10, cols - usedW - 2);
       var descText = trunc((mitem.desc || "").replace(/\r?\n/g, " "), descW);
       var descVis = stringWidth(descText);
       var gapW = Math.max(1, cols - usedW - descVis);
       var starStr = starRaw ? (YELLOW + " ".repeat(gapW) + "★" + mitem.stars + RST) : "";
       var mIcon = mitem.installed ? (GREEN + "●" + RST) : (GRAY + "○" + RST);
-      pushBody("  " + mbg + marrow + mIcon + " " + officialBadge + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
+      pushBody("  " + mbg + marrow + checkbox + mIcon + " " + officialBadge + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
       if (msel && mitem.url) {
         pushBody("  " + GRAY + "     " + trunc(mitem.url, cols - 10) + RST, msel);
       }
@@ -276,7 +281,11 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
     pushBody("", false);
     if (S.message) { pushFoot(messageLine(cols)); }
     pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["/", "Search"], ["?", "Help"], ["Q", "Quit"]]));
+    var selCount = Object.keys(S.mkSelected).length;
+    if (selCount > 0) {
+      pushFoot("  " + BOLD + GREEN + selCount + " selected" + RST + GRAY + " · Space: toggle · i: install selected" + RST);
+    }
+    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["Space", "Select"], ["/", "Search"], ["?", "Help"], ["Q", "Quit"]]));
     return;
   }
 

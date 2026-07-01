@@ -66,6 +66,7 @@ export const S = {
   mkScrollOff: 0,
   mkMode: "browse",
   mkAcursor: 0,
+  mkSelected: {},
 
   // Confirm dialog
   confirmAction: null,

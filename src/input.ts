@@ -14,6 +14,7 @@ import { getUpdater, setupPlugin } from "./updater.js";
 import { openProject, togglePin, hideItem, unhideAll, changeProjectPath, outputDir, getActions } from "./projects.js";
 import { getPluginActions, buildCombinedPluginList, fetchPluginRemotes, probeConfigSchema, buildConfigItems, setPluginConfig } from "./plugins.js";
 import { buildMarketplaceList, installMarketplacePlugin, invalidateCatalogCache, fetchCatalogsAsync } from "./marketplace.js";
+import { selectionKey, selectedInstallables } from "./selection.js";
 import { getInstalledMcpList, buildMcpList, installMcpServer, uninstallMcpServer, getMcpActions } from "./mcp.js";
 import { flash } from "./views/common.js";
 import { render } from "./views/render.js";
@@ -145,8 +146,19 @@ export function handlePluginKey(key) {
       // Browse mode
       if (key === "up" || key === "w") { S.mkCursor = Math.max(0, S.mkCursor - 1); }
       else if (key === "down" || key === "s") { S.mkCursor = Math.min(S.marketplaceItems.length - 1, S.mkCursor + 1); }
-      else if (key === "enter" || key === "space") {
+      else if (key === "enter") {
         if (S.marketplaceItems.length > 0) { S.mkMode = "actions"; S.mkAcursor = 0; }
+      }
+      else if (key === "space") {
+        var selItem = S.marketplaceItems[S.mkCursor];
+        if (selItem) {
+          if (selItem.installed) { flash((selItem.name || selItem.repoName) + " is already installed."); }
+          else {
+            var sk = selectionKey(selItem);
+            if (S.mkSelected[sk]) delete S.mkSelected[sk];
+            else S.mkSelected[sk] = true;
+          }
+        }
       }
       else if (key === "/") { S.mode = "search"; return; }
       else if (key === "r") {
@@ -157,7 +169,24 @@ export function handlePluginKey(key) {
         flash("Refreshing catalog...");
       }
       else if (key === "i") {
-        if (S.marketplaceItems.length > 0) {
+        var batch = selectedInstallables(S.MARKETPLACE_CATALOG, loadPlugins().map(function(p) { return p.name; }), S.mkSelected);
+        if (batch.length > 0) {
+          flash("Installing " + batch.length + " plugins...");
+          render();
+          var failed = [];
+          for (var bi = 0; bi < batch.length; bi++) {
+            var berr = installMarketplacePlugin(batch[bi]);
+            if (berr) failed.push(batch[bi].name || batch[bi].repoName);
+          }
+          var okCount = batch.length - failed.length;
+          flash(failed.length
+            ? ("Installed " + okCount + " · " + failed.length + " failed: " + failed.join(", ") + ". Restart to activate.")
+            : ("Installed " + okCount + "! Restart to activate."));
+          S.mkSelected = {};
+          S.pluginItems = buildCombinedPluginList();
+          S.marketplaceItems = buildMarketplaceList();
+          if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+        } else if (S.marketplaceItems.length > 0) {
           var quickItem = S.marketplaceItems[S.mkCursor];
           if (quickItem.installed) { flash(quickItem.name + " is already installed."); return; }
           flash("Installing " + (quickItem.name || quickItem.repoName) + "...");
