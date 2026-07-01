@@ -2,7 +2,7 @@
 // Plugins page rendering: plugin rows (git + npm + engine), the installed /
 // marketplace / custom sub-pages, and the action/commit menus.
 
-import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, MAGENTA, BG_SEL, stringWidth, pad, trunc, ACCENT, rule } from "../format.js";
+import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, MAGENTA, BG_SEL, stringWidth, pad, trunc, ACCENT, OK, BAD, rule } from "../format.js";
 import { selectionKey } from "../selection.js";
 import { S } from "../state.js";
 import { loadPlugins } from "../config.js";
@@ -30,11 +30,11 @@ export function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
 
   var statusParts = [];
   if (!pitem.enabled) {
-    statusParts.push(RED + "disabled" + RST);
+    statusParts.push(BAD + "disabled" + RST);
   } else if (pitem.autoUpdate) {
-    statusParts.push(GREEN + "auto" + RST);
+    statusParts.push(OK + "auto" + RST);
   } else {
-    statusParts.push(YELLOW + "manual" + RST);
+    statusParts.push(DIM + "manual" + RST);
   }
   if (pitem.enabled) {
     if (pitem.updateAvail) {
@@ -42,7 +42,7 @@ export function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
     } else if (pitem.deployed) {
       statusParts.push(GRAY + "ok" + RST);
     } else {
-      statusParts.push(RED + "missing" + RST);
+      statusParts.push(BAD + "missing" + RST);
     }
   }
 
@@ -130,7 +130,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       var editing = S.mode === "pcfginput" && csel;
       var valStr;
       if (editing) valStr = BG_SEL + " " + S.inputBuf + BOLD + "|" + RST;
-      else if (it.type === "boolean") valStr = (it.value ? GREEN + "true" : RED + "false") + RST;
+      else if (it.type === "boolean") valStr = (it.value ? OK + "true" : GRAY + "false") + RST;
       else valStr = WHITE + JSON.stringify(it.value) + RST;
       var mark = it.isSet ? "" : (GRAY + " (default)" + RST);
       var carrow = csel ? (ACCENT + " ❯ " + RST) : "   ";
@@ -263,21 +263,21 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       // official badge "◆ " occupies 2 chars; non-official gets 2 spaces to keep columns aligned
       var officialBadge = mitem.official ? (ACCENT + "◆ " + RST) : "  ";
       var officialBadgeW = 2;
-      // 2-char selection slot: selected accent dot, selectable faint dot, installed blank
-      var checkbox = mitem.installed ? "  "
-        : (S.mkSelected[selectionKey(mitem)] ? (ACCENT + "◉ " + RST) : (DIM + "· " + RST));
-      var checkboxW = 2;
-      var usedW = 2 + 3 + checkboxW + 1 + 1 + officialBadgeW + mkNameW + 2 + starVis;
+      // single status circle combines install + selection state (one circle, not two):
+      //   installed = dim ●, selected = accent ◉, selectable-unselected = ○
+      var circle = mitem.installed ? (DIM + "●" + RST)
+        : (S.mkSelected[selectionKey(mitem)] ? (ACCENT + "◉" + RST) : (GRAY + "○" + RST));
+      var circleW = 1;
+      var usedW = 2 + 3 + circleW + 1 + officialBadgeW + mkNameW + 2 + starVis;
       var descW = Math.max(10, cols - usedW - 2);
       var descText = trunc((mitem.desc || "").replace(/\r?\n/g, " "), descW);
       var descVis = stringWidth(descText);
       var gapW = Math.max(1, cols - usedW - descVis);
       var starStr = starRaw ? (YELLOW + " ".repeat(gapW) + "★" + mitem.stars + RST) : "";
-      var mIcon = mitem.installed ? (DIM + "●" + RST) : (GRAY + "○" + RST);
-      pushBody("  " + mbg + marrow + checkbox + mIcon + " " + officialBadge + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
+      pushBody("  " + mbg + marrow + circle + " " + officialBadge + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
       if (msel && mitem.url) {
-        // indent to align under the name column: 2("  ") + 3(cursor) + 2(select) + 1(icon) + 1(space) + 2(badge) = 11
-        pushBody("  " + GRAY + "         " + trunc(mitem.url, cols - 11) + RST, msel);
+        // indent to align under the name column: 2 + 3(cursor) + 1(circle) + 1(space) + 2(badge) = 9
+        pushBody("  " + GRAY + "       " + trunc(mitem.url, cols - 9) + RST, msel);
       }
     }
     pushBody("", false);

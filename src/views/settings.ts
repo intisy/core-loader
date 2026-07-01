@@ -3,7 +3,7 @@
 // Mirrors the mcp.ts structure: list view with cursor, delegates to the shared
 // pconfig/pcfginput overlay (already rendered by plugins.ts buildPlugins) for editing.
 
-import { RST, BOLD, DIM, GRAY, WHITE, GREEN, RED, BG_SEL, stringWidth, pad, trunc, ACCENT, rule } from "../format.js";
+import { RST, BOLD, DIM, GRAY, WHITE, GREEN, RED, OK, BG_SEL, stringWidth, pad, trunc, ACCENT, rule } from "../format.js";
 import { S } from "../state.js";
 import { GLOBAL_SETTINGS_DEFAULTS, loadGlobalSettings } from "../config.js";
 import { buildConfigItems } from "../plugins.js";
@@ -27,7 +27,7 @@ export function buildSettings(pushBody, pushFoot, cols, barW) {
       var editing = S.mode === "pcfginput" && csel;
       var valStr;
       if (editing) valStr = BG_SEL + " " + S.inputBuf + BOLD + "|" + RST;
-      else if (it.type === "boolean") valStr = (it.value ? GREEN + "true" : RED + "false") + RST;
+      else if (it.type === "boolean") valStr = (it.value ? OK + "true" : GRAY + "false") + RST;
       else valStr = WHITE + JSON.stringify(it.value) + RST;
       var mark = it.isSet ? "" : (GRAY + " (default)" + RST);
       var carrow = csel ? (ACCENT + " ❯ " + RST) : "   ";

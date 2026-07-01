@@ -1,5 +1,6 @@
 // @ts-nocheck
 // Terminal formatting: ANSI codes and width-aware string helpers (CJK counts 2).
+import { CLI_CMD } from "./env.js";
 export const E = "\x1b[";
 export const RST = E + "0m";
 export const BOLD = E + "1m";
@@ -15,10 +16,18 @@ export const MAGENTA = E + "35m";
 export const BG_SEL = E + "48;5;236m";
 export const CLR = E + "K";
 
-// Single accent color used everywhere (active tab, cursor, selection title,
-// official badge, section-accent). Swap this one line to re-theme the whole TUI
-// (e.g. CC lavender "38;5;147m"). Never hardcode the raw code elsewhere.
-export const ACCENT = E + "38;5;173m";
+// Per-loader accent so the two loaders (sharing this core-loader TUI) each get a
+// distinct palette: claude-code-loader = warm orange/tan (CC-inspired), opencode
+// -loader = teal. Resolved from the running loader (HUB_CLI_CMD). Swap either
+// constant to re-theme that loader (e.g. CC lavender "38;5;147m"). Used everywhere
+// (active tab, cursor, selection title, official badge); never hardcode it elsewhere.
+var ACCENT_CLAUDE = E + "38;5;173m";     // warm orange/tan
+var ACCENT_OPENCODE = E + "38;5;73m";    // teal
+export const ACCENT = String(CLI_CMD || "").indexOf("claude") !== -1 ? ACCENT_CLAUDE : ACCENT_OPENCODE;
+
+// Muted status tones that harmonize with the accent (softer than raw ANSI 31/32/33).
+export const OK = E + "38;5;108m";       // sage green — positive (auto, enabled, true)
+export const BAD = E + "38;5;174m";      // dusty rose — problem (disabled, missing)
 
 // Solid box-drawing divider, dim gray. Used for every full-width rule.
 export function rule(width) {

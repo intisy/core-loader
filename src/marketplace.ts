@@ -47,10 +47,11 @@ function seedOfficialPlugins() {
   for (var oi = 0; oi < OFFICIAL_PLUGINS.length; oi++) {
     var official = OFFICIAL_PLUGINS[oi];
     var officialKey = official.full_name.toLowerCase();
-    // look for an existing entry by full_name (case-insensitive) or by bare name
+    // Match by full_name ONLY. Matching by bare name wrongly marked third-party
+    // repos official when the GitHub search stripped their "opencode-"/"claude-"
+    // prefix into our name (e.g. vibheksoni/opencode-antigravity-auth -> "antigravity-auth").
     var existing = S.MARKETPLACE_CATALOG.find(function(e) {
-      return (e.full_name || "").toLowerCase() === officialKey ||
-             (e.name || "").toLowerCase() === official.name.toLowerCase();
+      return (e.full_name || "").toLowerCase() === officialKey;
     });
     if (existing) {
       // enrich without overwriting stars that may have been fetched already
