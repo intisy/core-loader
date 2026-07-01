@@ -275,7 +275,7 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       var mIcon = mitem.installed ? (GREEN + "●" + RST) : (GRAY + "○" + RST);
       pushBody("  " + mbg + marrow + checkbox + mIcon + " " + officialBadge + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
       if (msel && mitem.url) {
-        pushBody("  " + GRAY + "     " + trunc(mitem.url, cols - 10) + RST, msel);
+        pushBody("  " + GRAY + "         " + trunc(mitem.url, cols - 10) + RST, msel);
       }
     }
     pushBody("", false);
