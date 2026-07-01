@@ -44,6 +44,22 @@ export function loadCatalogCache() {
 // copy. This is safe to call multiple times because the deduplication check is
 // always performed first.
 function seedOfficialPlugins() {
+  // Official status is AUTHORITATIVE from OFFICIAL_PLUGINS (by full_name): an entry
+  // is official iff its full_name is one of ours. First clear any stale official
+  // flag — e.g. a fork a PAST build's name-match wrongly promoted and then baked
+  // into the on-disk catalog cache (vibheksoni/opencode-antigravity-auth, whose
+  // stripped name collided with our "antigravity-auth"). This self-heals bad caches.
+  var officialKeys = {};
+  for (var ok = 0; ok < OFFICIAL_PLUGINS.length; ok++) {
+    officialKeys[OFFICIAL_PLUGINS[ok].full_name.toLowerCase()] = true;
+  }
+  for (var ei = 0; ei < S.MARKETPLACE_CATALOG.length; ei++) {
+    var ce = S.MARKETPLACE_CATALOG[ei];
+    if (ce.official && !officialKeys[(ce.full_name || "").toLowerCase()]) {
+      ce.official = false;
+      if (ce.category === "Official") ce.category = "Community";
+    }
+  }
   for (var oi = 0; oi < OFFICIAL_PLUGINS.length; oi++) {
     var official = OFFICIAL_PLUGINS[oi];
     var officialKey = official.full_name.toLowerCase();
