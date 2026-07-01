@@ -4,7 +4,7 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
-import { exec, execSync } from "child_process";
+import { exec } from "child_process";
 import { CATALOG_CACHE_PATH, CACHE_DIR, MCP_CATALOG, OFFICIAL_PLUGINS, APP_NAME, REPOS_DIR, tuiLog } from "./env.js";
 import { S } from "./state.js";
 import { loadPlugins, savePlugins, catalogCacheHours } from "./config.js";
@@ -421,7 +421,10 @@ export function buildMarketplaceList() {
   return res;
 }
 
-export function installMarketplacePlugin(entry) {
+// Async so the git clone runs off the main thread (the event loop stays free to
+// animate the spinner and render). Every caller passes a `done(err)` callback:
+// err is null on success, or an error string.
+export function installMarketplacePlugin(entry, done) {
   var repoName = entry.repoName || entry.name;
   var url = entry.url;
   var plugins = loadPlugins();
@@ -432,11 +435,11 @@ export function installMarketplacePlugin(entry) {
   if (!existsSync(dir)) {
     var parentDir = dirname(dir);
     if (!existsSync(parentDir)) try { mkdirSync(parentDir, { recursive: true }); } catch {}
-    try {
-      execSync("git clone --recurse-submodules " + url + " " + folderName, { cwd: REPOS_DIR, timeout: 60000, stdio: "ignore" });
-      return null;
-    } catch (e) { return "Clone failed: " + (e.message || e); }
+    exec("git clone --recurse-submodules " + url + " " + folderName, { cwd: REPOS_DIR, timeout: 60000 }, function(err) {
+      done(err ? ("Clone failed: " + ((err && err.message) || err)) : null);
+    });
+    return;
   }
-  return null;
+  done(null);
 }
 

@@ -20,7 +20,48 @@ import { flash } from "./views/common.js";
 import { render } from "./views/render.js";
 import { tuiApi } from "./tui.js";
 
+// Set a persistent status message for a long busy action. Unlike flash(), it does
+// NOT auto-clear after 2.5s — the message (and its "..." spinner) stays up until
+// the completion callback flashes the result. Clears any pending flash timeout.
+function setBusyMessage(msg) {
+  if (S.msgTimeout) { clearTimeout(S.msgTimeout); S.msgTimeout = null; }
+  S.message = msg;
+}
+
+// Update a list of plugins SEQUENTIALLY off-thread (one child process at a time)
+// under the busy gate. Each step updates the "Updating name (k/N)..." message; the
+// final callback rebuilds the list, flashes a coherent summary, and runs onDone
+// (cursor clamp). Used by update-all ('a' key + action) and single update.
+function runUpdateSequence(toUpdate, onDone) {
+  S.busy = true;
+  var errors = [];
+  var updateNext = function(k) {
+    if (k >= toUpdate.length) {
+      S.pluginItems = buildCombinedPluginList();
+      S.busy = false;
+      flash(errors.length > 0 ? errors.join("; ") : toUpdate.length + " plugin(s) updated. Restart " + APP_NAME + " to apply.");
+      if (onDone) onDone();
+      render();
+      return;
+    }
+    var pi = toUpdate[k];
+    setBusyMessage(toUpdate.length > 1
+      ? ("Updating " + pi.name + " (" + (k + 1) + "/" + toUpdate.length + ")...")
+      : ("Updating " + pi.name + "..."));
+    render();
+    var repo = loadPlugins().find(function(r) { return r.name === pi.name; });
+    setupPlugin(repo || pi, function(e) {
+      if (e) errors.push(pi.name + ": " + e);
+      updateNext(k + 1);
+    });
+  };
+  updateNext(0);
+}
+
 export function handleKey(key) {
+  // A long install/update is running off-thread — ignore every key so the user
+  // stays in the current menu and can't navigate away or fire another action.
+  if (S.busy) return;
   if (S.helpOpen) { S.helpOpen = false; return; }
   if (key === "?" && S.mode === "list") { S.helpOpen = true; return; }
   // Page switching with left/right (only in list mode, not in actions/input)
@@ -128,13 +169,19 @@ export function handlePluginKey(key) {
         else if (key === "enter" || key === "space") {
           var action = mkActs[S.mkAcursor].key;
           if (action === "install") {
-            flash("Installing " + (mitem.name || mitem.repoName) + "...");
+            S.mkMode = "browse";
+            S.busy = true;
+            setBusyMessage("Installing " + (mitem.name || mitem.repoName) + "...");
             render();
-            var merr = installMarketplacePlugin(mitem);
-            if (merr) flash(merr);
-            else { flash("Installed! Restart to activate."); S.pluginItems = buildCombinedPluginList(); }
-            S.marketplaceItems = buildMarketplaceList();
-            if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+            installMarketplacePlugin(mitem, function(merr) {
+              S.busy = false;
+              if (merr) flash(merr);
+              else { flash("Installed! Restart to activate."); S.pluginItems = buildCombinedPluginList(); }
+              S.marketplaceItems = buildMarketplaceList();
+              if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+              render();
+            });
+            return;
           } else if (action === "browser" && mitem.url) {
             try {
               var openCmd = process.platform === "win32" ? "start \"\" \"" + mitem.url + "\"" : process.platform === "darwin" ? "open \"" + mitem.url + "\"" : "xdg-open \"" + mitem.url + "\"";
@@ -175,31 +222,46 @@ export function handlePluginKey(key) {
       else if (key === "i") {
         var batch = selectedInstallables(S.MARKETPLACE_CATALOG, loadPlugins().map(function(p) { return p.name; }), S.mkSelected);
         if (batch.length > 0) {
-          flash("Installing " + batch.length + " plugins...");
-          render();
+          // Install the selection SEQUENTIALLY off-thread: each callback kicks the
+          // next, so only one clone runs at a time and the progress count is coherent.
+          S.busy = true;
           var failed = [];
-          for (var bi = 0; bi < batch.length; bi++) {
-            var berr = installMarketplacePlugin(batch[bi]);
-            if (berr) failed.push(batch[bi].name || batch[bi].repoName);
-          }
-          var okCount = batch.length - failed.length;
-          flash(failed.length
-            ? ("Installed " + okCount + " · " + failed.length + " failed: " + failed.join(", ") + ". Restart to activate.")
-            : ("Installed " + okCount + "! Restart to activate."));
-          S.mkSelected = {};
-          S.pluginItems = buildCombinedPluginList();
-          S.marketplaceItems = buildMarketplaceList();
-          if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+          var installNext = function(k) {
+            if (k >= batch.length) {
+              var okCount = batch.length - failed.length;
+              S.mkSelected = {};
+              S.busy = false;
+              flash(failed.length
+                ? ("Installed " + okCount + " · " + failed.length + " failed: " + failed.join(", ") + ". Restart to activate.")
+                : ("Installed " + okCount + "! Restart to activate."));
+              S.pluginItems = buildCombinedPluginList();
+              S.marketplaceItems = buildMarketplaceList();
+              if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+              render();
+              return;
+            }
+            setBusyMessage("Installing " + (k + 1) + "/" + batch.length + "...");
+            render();
+            installMarketplacePlugin(batch[k], function(berr) {
+              if (berr) failed.push(batch[k].name || batch[k].repoName);
+              installNext(k + 1);
+            });
+          };
+          installNext(0);
         } else if (S.marketplaceItems.length > 0) {
           var quickItem = S.marketplaceItems[S.mkCursor];
           if (quickItem.installed) { flash(quickItem.name + " is already installed."); return; }
-          flash("Installing " + (quickItem.name || quickItem.repoName) + "...");
+          S.busy = true;
+          setBusyMessage("Installing " + (quickItem.name || quickItem.repoName) + "...");
           render();
-          var quickErr = installMarketplacePlugin(quickItem);
-          if (quickErr) flash(quickErr);
-          else { flash("Installed! Restart to activate."); S.pluginItems = buildCombinedPluginList(); }
-          S.marketplaceItems = buildMarketplaceList();
-          if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+          installMarketplacePlugin(quickItem, function(quickErr) {
+            S.busy = false;
+            if (quickErr) flash(quickErr);
+            else { flash("Installed! Restart to activate."); S.pluginItems = buildCombinedPluginList(); }
+            S.marketplaceItems = buildMarketplaceList();
+            if (S.mkCursor >= S.marketplaceItems.length) S.mkCursor = Math.max(0, S.marketplaceItems.length - 1);
+            render();
+          });
         }
       }
     } else if (S.pluginSubPage === "installed") {
@@ -231,36 +293,16 @@ export function handlePluginKey(key) {
         if (toUpdate.length === 0) {
           flash("All plugins are already up to date.");
         } else {
-          var errors = [];
-          var remaining = toUpdate.length;
-          flash("Updating " + remaining + " plugin(s)...");
-          render();
-          toUpdate.forEach(function(pi) {
-            var repo = loadPlugins().find(function(r) { return r.name === pi.name; });
-            setupPlugin(repo || pi, function(e) {
-              if (e) errors.push(pi.name + ": " + e);
-              remaining--;
-              if (remaining <= 0) {
-                S.pluginItems = buildCombinedPluginList();
-                if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
-                flash(errors.length > 0 ? errors.join("; ") : toUpdate.length + " plugin(s) updated. Restart " + APP_NAME + " to apply.");
-                render();
-              }
-            });
+          runUpdateSequence(toUpdate, function() {
+            if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
           });
         }
       }
       else if (key === "u") {
         if (S.pluginItems.length > 0 && S.pluginItems[S.pcursor].type !== "npm") {
           var p = S.pluginItems[S.pcursor];
-          flash("Updating " + p.name + "...");
-          render();
-          var pRepo = loadPlugins().find(function(r) { return r.name === p.name; });
-          setupPlugin(pRepo || p, function(err) {
-            S.pluginItems = buildCombinedPluginList();
+          runUpdateSequence([p], function() {
             if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
-            flash(err ? p.name + ": " + err : p.name + " updated. Restart " + APP_NAME + " to apply.");
-            render();
           });
         }
       }
@@ -328,15 +370,9 @@ export function handlePluginKey(key) {
         S.mode = "pinput";
       }
       else if (action === "update") {
-        flash("Updating " + pitem.name + "...");
         S.mode = "list";
-        render();
-        var actRepo = loadPlugins().find(function(r) { return r.name === pitem.name; });
-        setupPlugin(actRepo || pitem, function(err) {
-          S.pluginItems = buildCombinedPluginList();
+        runUpdateSequence([pitem], function() {
           if (S.pcursor >= S.pluginItems.length) S.pcursor = Math.max(0, S.pluginItems.length - 1);
-          flash(err ? pitem.name + ": " + err : pitem.name + " updated. Restart " + APP_NAME + " to apply.");
-          render();
         });
       }
       else if (action === "check-updates") {
@@ -355,22 +391,7 @@ export function handlePluginKey(key) {
         if (toUpdate.length === 0) {
           flash("All plugins are already up to date.");
         } else {
-          var allErrors = [];
-          var allRemaining = toUpdate.length;
-          flash("Updating " + allRemaining + " plugin(s)...");
-          render();
-          toUpdate.forEach(function(pi) {
-            var repo = loadPlugins().find(function(r) { return r.name === pi.name; });
-            setupPlugin(repo || pi, function(e) {
-              if (e) allErrors.push(pi.name + ": " + e);
-              allRemaining--;
-              if (allRemaining <= 0) {
-                S.pluginItems = buildCombinedPluginList();
-                flash(allErrors.length > 0 ? allErrors.join("; ") : toUpdate.length + " plugin(s) updated. Restart " + APP_NAME + " to apply.");
-                render();
-              }
-            });
-          });
+          runUpdateSequence(toUpdate, null);
         }
       }
       else if (action === "refresh") {

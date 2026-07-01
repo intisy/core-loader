@@ -73,6 +73,10 @@ export const S = {
   confirmLabel: "",
   confirmCursor: 0,
 
+  // Long-action gate: true while an off-thread install/update runs; blocks all
+  // key handling (see handleKey) so the user stays put and can't fire more work.
+  busy: false,
+
   // Status message + render scheduling
   message: "",
   msgTimeout: null,

@@ -43,6 +43,12 @@ export function getUpdater() {
   return null;
 }
 
+// The resolved bundle path getUpdater() cached — used to run updatePluginPublic
+// in a child process (setupPlugin) so the update doesn't block the main thread.
+export function getUpdaterPath() {
+  return S.UPDATER_PATH;
+}
+
 export function getUpdaterVersion() {
   try {
     if (!getUpdater() || !S.UPDATER_PATH) return "";
@@ -53,15 +59,22 @@ export function getUpdaterVersion() {
   } catch { return ""; }
 }
 
+// Run the updater's updatePluginPublic (git + build + deploy + activate) in a
+// child node process so the git/build execSync inside plugin-updater blocks that
+// child, not our main event loop — the TUI keeps rendering and animating.
 export function setupPlugin(repo, done) {
   var updater = getUpdater();
-  if (!updater || typeof updater.updatePluginPublic !== "function") {
+  if (!updater || typeof updater.updatePluginPublic !== "function" || !getUpdaterPath()) {
     done("updater not available");
     return;
   }
-  Promise.resolve(updater.updatePluginPublic(repo.name, repo.url, repo.branch))
-    .then(function() { done(""); })
-    .catch(function(e) { done(String((e && e.message) || e)); });
+  var updaterPath = getUpdaterPath();
+  var script = 'const {pathToFileURL}=require("url"); import(pathToFileURL(process.argv[1]).href).then(function(m){return m.updatePluginPublic(process.argv[2], process.argv[3]||undefined, process.argv[4]||undefined);}).then(function(){process.exit(0);}).catch(function(e){console.error((e&&e.message)||e);process.exit(1);});';
+  var child = require("child_process").spawn(process.execPath, ["-e", script, updaterPath, repo.name, repo.url || "", repo.branch || ""], { stdio: ["ignore", "ignore", "pipe"], env: process.env });
+  var errBuf = "";
+  child.stderr.on("data", function(d) { errBuf += d.toString(); });
+  child.on("error", function(e) { done(String((e && e.message) || e)); });
+  child.on("exit", function(code) { done(code === 0 ? "" : (errBuf.trim() || "update failed")); });
 }
 
 export function getNpmGlobalRoot() {
