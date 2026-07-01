@@ -109,6 +109,20 @@ export const CURATED_MCP_REPOS = {
 // runtime carry no curated flag, which is correct.
 MCP_CATALOG.forEach(function (e) { e.curated = true; if (CURATED_MCP_REPOS[e.name]) e.full_name = CURATED_MCP_REPOS[e.name]; });
 
+// First-party plugins maintained by the intisy-ai org. These are always shown
+// at the top of the marketplace in a dedicated "Official · intisy-ai" section
+// and are present regardless of whether the remote catalog fetch has completed.
+export const OFFICIAL_PLUGINS = [
+  { name: "antigravity-auth", repoName: "antigravity-auth", full_name: "intisy-ai/antigravity-auth", url: "https://github.com/intisy-ai/antigravity-auth.git", desc: "Antigravity (Gemini) auth provider: OAuth accounts, model mapping, rotation", author: "intisy-ai", category: "Official" },
+  { name: "claude-code-auth",  repoName: "claude-code-auth",  full_name: "intisy-ai/claude-code-auth",  url: "https://github.com/intisy-ai/claude-code-auth.git",  desc: "Claude Code auth provider: multi-account OAuth with cooldown & rotation",       author: "intisy-ai", category: "Official" },
+  { name: "stub-auth",         repoName: "stub-auth",         full_name: "intisy-ai/stub-auth",         url: "https://github.com/intisy-ai/stub-auth.git",         desc: "Example provider showcasing the core-auth SDK (stub/mock)",                    author: "intisy-ai", category: "Official" },
+  { name: "metric-dashboard",  repoName: "metric-dashboard",  full_name: "intisy-ai/metric-dashboard",  url: "https://github.com/intisy-ai/metric-dashboard.git",  desc: "Local usage & metrics dashboard with a web UI",                                author: "intisy-ai", category: "Official" },
+  { name: "sync-bridge",       repoName: "sync-bridge",       full_name: "intisy-ai/sync-bridge",       url: "https://github.com/intisy-ai/sync-bridge.git",       desc: "Sync config & accounts across opencode and Claude Code",                       author: "intisy-ai", category: "Official" },
+  { name: "wakatime-sync",     repoName: "wakatime-sync",     full_name: "intisy-ai/wakatime-sync",     url: "https://github.com/intisy-ai/wakatime-sync.git",     desc: "WakaTime time-tracking heartbeats for opencode & Claude Code",                 author: "intisy-ai", category: "Official" },
+];
+// mark every entry so downstream code can test e.official without string comparisons
+OFFICIAL_PLUGINS.forEach(function(e) { e.official = true; });
+
 export const MCP_CATEGORIES = ["All", "Search", "Development", "Files", "Database", "Cloud", "Communication", "Productivity", "Data", "AI", "Plugin"];
 
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

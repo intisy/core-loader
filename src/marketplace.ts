@@ -5,7 +5,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "fs";
 import { join, dirname } from "path";
 import { exec, execSync } from "child_process";
-import { CATALOG_CACHE_PATH, CACHE_DIR, MCP_CATALOG, APP_NAME, REPOS_DIR, tuiLog } from "./env.js";
+import { CATALOG_CACHE_PATH, CACHE_DIR, MCP_CATALOG, OFFICIAL_PLUGINS, APP_NAME, REPOS_DIR, tuiLog } from "./env.js";
 import { S } from "./state.js";
 import { loadPlugins, savePlugins, catalogCacheHours } from "./config.js";
 import { scheduleRender } from "./views/common.js";
@@ -37,15 +37,51 @@ export function loadCatalogCache() {
   } catch { return false; }
 }
 
+// Ensure every official plugin is present in the catalog exactly once.
+// If a remote search already returned the repo (case-insensitive full_name or
+// name match), enrich that entry in place (mark official, fix category/desc/url)
+// WITHOUT overwriting an existing star count. If no match exists, push a shallow
+// copy. This is safe to call multiple times because the deduplication check is
+// always performed first.
+function seedOfficialPlugins() {
+  for (var oi = 0; oi < OFFICIAL_PLUGINS.length; oi++) {
+    var official = OFFICIAL_PLUGINS[oi];
+    var officialKey = official.full_name.toLowerCase();
+    // look for an existing entry by full_name (case-insensitive) or by bare name
+    var existing = S.MARKETPLACE_CATALOG.find(function(e) {
+      return (e.full_name || "").toLowerCase() === officialKey ||
+             (e.name || "").toLowerCase() === official.name.toLowerCase();
+    });
+    if (existing) {
+      // enrich without overwriting stars that may have been fetched already
+      existing.official  = true;
+      existing.category  = "Official";
+      if (!existing.desc)     existing.desc     = official.desc;
+      if (!existing.url)      existing.url      = official.url;
+      if (!existing.author)   existing.author   = official.author;
+      if (!existing.repoName) existing.repoName = official.repoName;
+      if (!existing.full_name) existing.full_name = official.full_name;
+    } else {
+      // not yet in catalog — add a copy (stars left undefined until enrichment runs)
+      var copy = {};
+      for (var k in official) copy[k] = official[k];
+      S.MARKETPLACE_CATALOG.push(copy);
+    }
+  }
+}
+
 export function fetchCatalogsAsync() {
   if (S.catalogFetched) return;
   S.catalogFetched = true;
   var curlCmd = process.platform === "win32" ? "curl.exe" : "curl";
   // even with a warm cache the curated MCP entries still need their stars derived
   // (the cache predates them) — run that enrichment, then skip the cold registry search
-  if (loadCatalogCache()) { enrichCuratedMcpStars(); return; }
+  if (loadCatalogCache()) { seedOfficialPlugins(); enrichCuratedMcpStars(); return; }
 
   var enrichedOnce = false;
+
+  // seed official entries immediately so they appear even before remote fetches finish
+  seedOfficialPlugins();
 
   function saveCatalog() {
     try {
@@ -371,6 +407,16 @@ export function buildMarketplaceList() {
     var q = S.inputBuf.toLowerCase();
     res = res.filter(function(m) { return (m.name||'').toLowerCase().indexOf(q) !== -1 || (m.desc||'').toLowerCase().indexOf(q) !== -1; });
   }
+  // official entries always appear first; within each group sort by stars desc then name asc
+  res.sort(function(a, b) {
+    var aOff = a.official ? 1 : 0;
+    var bOff = b.official ? 1 : 0;
+    if (bOff !== aOff) return bOff - aOff;
+    var aSt = a.stars != null ? a.stars : -1;
+    var bSt = b.stars != null ? b.stars : -1;
+    if (bSt !== aSt) return bSt - aSt;
+    return (a.name || "").localeCompare(b.name || "");
+  });
   return res;
 }
 

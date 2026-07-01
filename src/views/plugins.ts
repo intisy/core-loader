@@ -235,8 +235,22 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
         pushBody("  " + GRAY + "Marketplace catalog is empty. Press R to retry." + RST, false);
       }
     }
+    // track the current section so we insert a header when the group changes
+    var lastGroup = null;
     for (var mi = 0; mi < S.marketplaceItems.length; mi++) {
       var mitem = S.marketplaceItems[mi];
+      var group = mitem.official ? "official" : "community";
+
+      // emit a non-selectable section header whenever the group changes
+      if (group !== lastGroup) {
+        if (group === "official") {
+          pushBody("  " + BOLD + CYAN + "  Official · intisy-ai" + RST, false);
+        } else {
+          pushBody("  " + BOLD + GRAY + "  Community" + RST, false);
+        }
+        lastGroup = group;
+      }
+
       var msel = mi === S.mkCursor;
       var marrow = msel ? (YELLOW + " > " + RST) : "   ";
       var mbg = msel ? BG_SEL : "";
@@ -244,14 +258,17 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       var starRaw = mitem.stars != null ? " ★" + mitem.stars : "";
       var starVis = starRaw.length;
       var mkNameW = Math.min(30, nameW);
-      var usedW = 2 + 3 + 2 + mkNameW + 2 + starVis;
+      // official badge "◆ " occupies 2 chars; non-official gets 2 spaces to keep columns aligned
+      var officialBadge = mitem.official ? (MAGENTA + "◆ " + RST) : "  ";
+      var officialBadgeW = 2;
+      var usedW = 2 + 3 + 2 + officialBadgeW + mkNameW + 2 + starVis;
       var descW = Math.max(10, cols - usedW - 2);
       var descText = trunc((mitem.desc || "").replace(/\r?\n/g, " "), descW);
       var descVis = stringWidth(descText);
       var gapW = Math.max(1, cols - usedW - descVis);
       var starStr = starRaw ? (YELLOW + " ".repeat(gapW) + "★" + mitem.stars + RST) : "";
       var mIcon = mitem.installed ? (GREEN + "●" + RST) : (GRAY + "○" + RST);
-      pushBody("  " + mbg + marrow + mIcon + " " + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
+      pushBody("  " + mbg + marrow + mIcon + " " + officialBadge + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
       if (msel && mitem.url) {
         pushBody("  " + GRAY + "     " + trunc(mitem.url, cols - 10) + RST, msel);
       }
