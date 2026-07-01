@@ -4,7 +4,7 @@
 
 import { existsSync } from "fs";
 import { join } from "path";
-import { execSync } from "child_process";
+import { execSync, exec } from "child_process";
 import { REPOS_DIR, PLUGINS_DIR } from "./env.js";
 import { loadPlugins } from "./config.js";
 import { getFolderName, loadNpmPlugins, getUpdater, getUpdaterVersion } from "./updater.js";
@@ -64,17 +64,40 @@ export function buildPluginList() {
   return list;
 }
 
-export function fetchPluginRemotes(pluginItems) {
-  for (var p of pluginItems) {
-    if (p.type === "npm" || !p.installed) continue;
+// async git text (non-blocking), so a network `git fetch` never blocks the TUI loop
+function gitTextAsync(args, cwd, cb) {
+  exec(args.join(" "), { cwd: cwd, timeout: 15000 }, function(err, stdout) {
+    cb(err ? "" : String(stdout || "").trim());
+  });
+}
+
+// Fetch each git plugin's remote HEAD OFF the main thread (parallel), then invoke
+// done() once all complete. `git fetch` hits the network (up to 15s each) — running
+// it synchronously froze the UI; async keeps the loop free so the spinner animates.
+export function fetchPluginRemotes(pluginItems, done) {
+  var targets = pluginItems.filter(function(p) { return p.type !== "npm" && p.installed; });
+  var remaining = targets.length;
+  if (remaining === 0) { if (done) done(); return; }
+  targets.forEach(function(p) {
     var dir = join(REPOS_DIR, p.folderName);
-    gitText(["git", "fetch", "origin"], dir);
-    for (var ref of ["origin/HEAD", "origin/main", "origin/master"]) {
-      var h = gitText(["git", "rev-parse", ref], dir);
-      if (h) { p.remoteHead = h; break; }
-    }
-    p.updateAvail = !!(p.localHead && p.remoteHead && p.localHead !== p.remoteHead);
-  }
+    gitTextAsync(["git", "fetch", "origin"], dir, function() {
+      var refs = ["origin/HEAD", "origin/main", "origin/master"];
+      var ri = 0;
+      var finish = function() {
+        p.updateAvail = !!(p.localHead && p.remoteHead && p.localHead !== p.remoteHead);
+        remaining--;
+        if (remaining === 0 && done) done();
+      };
+      var tryRef = function() {
+        if (ri >= refs.length) { finish(); return; }
+        gitTextAsync(["git", "rev-parse", refs[ri]], dir, function(h) {
+          if (h) { p.remoteHead = h; finish(); }
+          else { ri++; tryRef(); }
+        });
+      };
+      tryRef();
+    });
+  });
 }
 
 export function buildCombinedPluginList() {

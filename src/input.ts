@@ -280,13 +280,17 @@ export function handlePluginKey(key) {
         flash("Refreshed.");
       }
       else if (key === "f") {
-        flash("Fetching remotes...");
+        S.busy = true;
+        setBusyMessage("Fetching remotes...");
         render();
-        fetchPluginRemotes(S.pluginItems);
-        S.pluginFetched = true;
-        var updateCount = 0;
-        for (var p of S.pluginItems) { if (p.updateAvail) updateCount++; }
-        flash(updateCount > 0 ? updateCount + " update(s) available" : "All plugins up to date");
+        fetchPluginRemotes(S.pluginItems, function() {
+          S.pluginFetched = true;
+          S.busy = false;
+          var updateCount = 0;
+          for (var p of S.pluginItems) { if (p.updateAvail) updateCount++; }
+          flash(updateCount > 0 ? updateCount + " update(s) available" : "All plugins up to date");
+          render();
+        });
       }
       else if (key === "a") {
         var toUpdate = S.pluginItems.filter(function(p) { return p.type !== "npm" && (p.updateAvail || !p.deployed); });
@@ -377,13 +381,17 @@ export function handlePluginKey(key) {
       }
       else if (action === "check-updates") {
         S.mode = "list";
-        flash("Fetching remotes...");
+        S.busy = true;
+        setBusyMessage("Fetching remotes...");
         render();
-        fetchPluginRemotes(S.pluginItems);
-        S.pluginFetched = true;
-        var ucount = 0;
-        for (var pu of S.pluginItems) { if (pu.updateAvail) ucount++; }
-        flash(ucount > 0 ? ucount + " update(s) available" : "All plugins up to date");
+        fetchPluginRemotes(S.pluginItems, function() {
+          S.pluginFetched = true;
+          S.busy = false;
+          var ucount = 0;
+          for (var pu of S.pluginItems) { if (pu.updateAvail) ucount++; }
+          flash(ucount > 0 ? ucount + " update(s) available" : "All plugins up to date");
+          render();
+        });
       }
       else if (action === "update-all") {
         S.mode = "list";

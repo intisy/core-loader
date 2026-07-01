@@ -69,8 +69,13 @@ export function setupPlugin(repo, done) {
     return;
   }
   var updaterPath = getUpdaterPath();
-  var script = 'const {pathToFileURL}=require("url"); import(pathToFileURL(process.argv[1]).href).then(function(m){return m.updatePluginPublic(process.argv[2], process.argv[3]||undefined, process.argv[4]||undefined);}).then(function(){process.exit(0);}).catch(function(e){console.error((e&&e.message)||e);process.exit(1);});';
-  var child = require("child_process").spawn(process.execPath, ["-e", script, updaterPath, repo.name, repo.url || "", repo.branch || ""], { stdio: ["ignore", "ignore", "pipe"], env: process.env });
+  // Params go through ENV, not argv: the loader runs under Bun, and `bun -e "code" a b`
+  // does NOT expose the trailing args at process.argv[1..] like `node -e` does — so
+  // positional args arrived undefined and updatePluginPublic built nothing. Env is
+  // read identically under both runtimes.
+  var script = 'const {pathToFileURL}=require("url"); import(pathToFileURL(process.env.PU_PATH).href).then(function(m){return m.updatePluginPublic(process.env.PU_NAME, process.env.PU_URL||undefined, process.env.PU_BRANCH||undefined);}).then(function(){process.exit(0);}).catch(function(e){console.error((e&&e.message)||e);process.exit(1);});';
+  var childEnv = Object.assign({}, process.env, { PU_PATH: updaterPath, PU_NAME: repo.name, PU_URL: repo.url || "", PU_BRANCH: repo.branch || "" });
+  var child = require("child_process").spawn(process.execPath, ["-e", script], { stdio: ["ignore", "ignore", "pipe"], env: childEnv });
   var errBuf = "";
   child.stderr.on("data", function(d) { errBuf += d.toString(); });
   child.on("error", function(e) { done(String((e && e.message) || e)); });
