@@ -3,7 +3,7 @@
 // Mirrors the mcp.ts structure: list view with cursor, delegates to the shared
 // pconfig/pcfginput overlay (already rendered by plugins.ts buildPlugins) for editing.
 
-import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, RED, MAGENTA, BG_SEL, stringWidth, pad, trunc } from "../format.js";
+import { RST, BOLD, DIM, GRAY, WHITE, GREEN, RED, BG_SEL, stringWidth, pad, trunc, ACCENT, rule } from "../format.js";
 import { S } from "../state.js";
 import { GLOBAL_SETTINGS_DEFAULTS, loadGlobalSettings } from "../config.js";
 import { buildConfigItems } from "../plugins.js";
@@ -15,7 +15,7 @@ export function buildSettings(pushBody, pushFoot, cols, barW) {
   if (S.mode === "pconfig" || S.mode === "pcfginput") {
     var ct = S.configTarget;
     var cname = (ct && ct.name) || "settings";
-    pushBody("  " + MAGENTA + "#" + GRAY + " Configure " + WHITE + trunc(cname, cols - 16) + RST, false);
+    pushBody("  " + BOLD + WHITE + "Configure " + trunc(cname, cols - 16) + RST, false);
     pushBody("  " + GRAY + "changes save to config/settings.json (restart to apply)" + RST, false);
     pushBody("", false);
     var keyW = 6;
@@ -30,16 +30,16 @@ export function buildSettings(pushBody, pushFoot, cols, barW) {
       else if (it.type === "boolean") valStr = (it.value ? GREEN + "true" : RED + "false") + RST;
       else valStr = WHITE + JSON.stringify(it.value) + RST;
       var mark = it.isSet ? "" : (GRAY + " (default)" + RST);
-      var carrow = csel ? (YELLOW + " > " + RST) : "   ";
+      var carrow = csel ? (ACCENT + " ❯ " + RST) : "   ";
       var cbg = csel ? BG_SEL : "";
       var cNameStyle = csel ? (BOLD + WHITE) : DIM;
       pushBody("  " + cbg + carrow + cNameStyle + pad(trunc(it.key, keyW), keyW) + RST + cbg + "  " + valStr + mark + RST, csel);
     }
     pushBody("", false);
     if (S.message) pushFoot(messageLine(cols));
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    if (S.mode === "pcfginput") pushFoot(hints([["Enter", "Save"], ["Esc", "Cancel"]]));
-    else pushFoot(hints([["^v/WS", "Move"], ["Enter", "Edit/Toggle"], ["Esc", "Back"]]));
+    pushFoot("  " + rule(barW));
+    if (S.mode === "pcfginput") pushFoot(hints([["enter", "save"], ["esc", "cancel"]]));
+    else pushFoot(hints([["↑↓", "move"], ["enter", "edit/toggle"], ["esc", "back"]]));
     return;
   }
 
@@ -47,7 +47,7 @@ export function buildSettings(pushBody, pushFoot, cols, barW) {
   var items = buildConfigItems({ defaults: GLOBAL_SETTINGS_DEFAULTS, current: loadGlobalSettings() });
 
   pushBody("  " + BOLD + WHITE + "Global Settings" + RST, false);
-  pushBody("  " + GRAY + "Ecosystem-wide settings stored in config/settings.json" + RST, false);
+  pushBody("  " + DIM + "Ecosystem-wide settings stored in config/settings.json" + RST, false);
   pushBody("", false);
 
   if (items.length === 0) {
@@ -59,7 +59,7 @@ export function buildSettings(pushBody, pushFoot, cols, barW) {
     for (var i = 0; i < items.length; i++) {
       var it = items[i];
       var sel = i === S.settingsCursor;
-      var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+      var arrow = sel ? (ACCENT + " ❯ " + RST) : "   ";
       var bg = sel ? BG_SEL : "";
       var nameStyle = sel ? (BOLD + WHITE) : DIM;
       var valStr;
@@ -72,6 +72,6 @@ export function buildSettings(pushBody, pushFoot, cols, barW) {
 
   pushBody("", false);
   if (S.message) pushFoot(messageLine(cols));
-  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-  pushFoot(hints([["^v/WS", "Move"], ["Enter", "Edit/Toggle"], ["?", "Help"], ["Q", "Quit"]]));
+  pushFoot("  " + rule(barW));
+  pushFoot(hints([["↑↓", "move"], ["enter", "edit/toggle"], ["?", "help"], ["q", "quit"]]));
 }

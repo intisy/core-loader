@@ -15,6 +15,16 @@ export const MAGENTA = E + "35m";
 export const BG_SEL = E + "48;5;236m";
 export const CLR = E + "K";
 
+// Single accent color used everywhere (active tab, cursor, selection title,
+// official badge, section-accent). Swap this one line to re-theme the whole TUI
+// (e.g. CC lavender "38;5;147m"). Never hardcode the raw code elsewhere.
+export const ACCENT = E + "38;5;173m";
+
+// Solid box-drawing divider, dim gray. Used for every full-width rule.
+export function rule(width) {
+  return GRAY + "─".repeat(width) + RST;
+}
+
 export function stringWidth(str) {
   var w = 0;
   str = String(str || "").replace(/\x1b\[[0-9;]*m/g, "");

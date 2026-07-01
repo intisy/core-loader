@@ -2,7 +2,7 @@
 // Shared view helpers: status message, spinner, hint bar, and the confirm/help
 // overlays. flash/scheduleRender drive redraws via render().
 
-import { RST, BOLD, DIM, GRAY, WHITE, GREEN, CYAN, MAGENTA, trunc, pad } from "../format.js";
+import { RST, BOLD, DIM, GRAY, WHITE, GREEN, trunc, pad, ACCENT, rule } from "../format.js";
 import { S } from "../state.js";
 import { HELP_BINDINGS, SPINNER_FRAMES } from "../env.js";
 import { render } from "./render.js";
@@ -20,10 +20,10 @@ export function scheduleRender() {
 }
 
 export function hints(pairs) {
-  return "  " + pairs.map(function(p) { return DIM + p[0] + RST + " " + p[1]; }).join("  ");
+  return "  " + GRAY + pairs.map(function(p) { return p[0] + " " + p[1]; }).join(" · ") + RST;
 }
 
-export function spinnerFrame() { return CYAN + SPINNER_FRAMES[S.spinnerTick % SPINNER_FRAMES.length] + RST; }
+export function spinnerFrame() { return ACCENT + SPINNER_FRAMES[S.spinnerTick % SPINNER_FRAMES.length] + RST; }
 
 export function updateSpinner() {
   var active = S.catalogPending > 0 || (S.message && S.message.indexOf("...") !== -1);
@@ -48,14 +48,14 @@ export function buildConfirm(pushBody, pushFoot, cols, barW) {
   var opts = ["Yes", "Cancel"];
   for (var i = 0; i < opts.length; i++) {
     if (i === S.confirmCursor) {
-      pushBody("    " + GREEN + "  > " + BOLD + opts[i] + RST, true);
+      pushBody("    " + ACCENT + "❯ " + BOLD + ACCENT + opts[i] + RST, true);
     } else {
-      pushBody("    " + GRAY + "    " + opts[i] + RST, false);
+      pushBody("    " + DIM + "  " + opts[i] + RST, false);
     }
   }
   pushBody("", false);
-  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-  pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Y", "Yes"], ["N/Esc", "Cancel"]]));
+  pushFoot("  " + rule(barW));
+  pushFoot(hints([["↑↓", "move"], ["enter", "confirm"], ["y", "yes"], ["n/esc", "cancel"]]));
 }
 
 export function buildHelp(pushBody, pushFoot, cols, barW) {
@@ -66,6 +66,6 @@ export function buildHelp(pushBody, pushFoot, cols, barW) {
     pushBody("    " + BOLD + WHITE + pad(binds[i][0], 16) + RST + GRAY + binds[i][1] + RST, false);
   }
   pushBody("", false);
-  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-  pushFoot(hints([["Any key", "Close"]]));
+  pushFoot("  " + rule(barW));
+  pushFoot(hints([["any key", "close"]]));
 }

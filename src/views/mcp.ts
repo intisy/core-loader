@@ -1,7 +1,7 @@
 // @ts-nocheck
 // MCP page rendering: installed / marketplace sub-pages and the action menu.
 
-import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, MAGENTA, CYAN, BG_SEL, stringWidth, pad, trunc } from "../format.js";
+import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, BG_SEL, stringWidth, pad, trunc, ACCENT, rule } from "../format.js";
 import { S } from "../state.js";
 import { getInstalledMcpList, buildMcpList, getMcpActions } from "../mcp.js";
 import { hints, messageLine } from "./common.js";
@@ -24,20 +24,20 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
       var a = acts[j];
       var aSel = j === S.mcpAcursor;
       if (aSel) {
-        pushBody("    " + GREEN + "  > " + BOLD + a.label + RST, true);
+        pushBody("    " + ACCENT + "❯ " + BOLD + ACCENT + a.label + RST, true);
       } else {
-        pushBody("    " + GRAY + "    " + a.label + RST, false);
+        pushBody("    " + DIM + "  " + a.label + RST, false);
       }
     }
     pushBody("", false);
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
+    pushFoot("  " + rule(barW));
+    pushFoot(hints([["↑↓", "move"], ["enter", "confirm"], ["esc", "back"]]));
     return;
   }
 
-  var mcpInstTab = S.mcpSubPage === "installed" ? (BOLD + WHITE + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
-  var mcpMktTab = S.mcpSubPage === "marketplace" ? (BOLD + WHITE + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
-  pushBody("  " + mcpInstTab + "  " + mcpMktTab + "    " + DIM + "Tab" + RST + " switch", false);
+  var mcpInstTab = S.mcpSubPage === "installed" ? (BOLD + ACCENT + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
+  var mcpMktTab = S.mcpSubPage === "marketplace" ? (BOLD + ACCENT + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
+  pushBody("  " + mcpInstTab + "  " + mcpMktTab + "    " + DIM + "tab switch" + RST, false);
   pushBody("", false);
 
   if (S.mcpSubPage === "installed") {
@@ -46,11 +46,11 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
       pushBody("  " + GRAY + "No MCP servers installed." + RST, false);
       pushBody("  " + GRAY + "Switch to Marketplace to browse and install servers." + RST, false);
     } else {
-      pushBody("  " + BOLD + WHITE + "Installed MCP Servers (" + installedList.length + ")" + RST, false);
+      pushBody("  " + BOLD + WHITE + "Installed MCP Servers" + RST + GRAY + " (" + installedList.length + ")" + RST, false);
       for (var i = 0; i < installedList.length; i++) {
         var m = installedList[i];
         var sel = i === S.mcpCursor;
-        var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+        var arrow = sel ? (ACCENT + " \u276f " + RST) : "   ";
         var bg = sel ? BG_SEL : "";
         var nameStyle = sel ? (BOLD + WHITE) : DIM;
         pushBody("  " + bg + arrow + GREEN + "\u25cf" + RST + " " + nameStyle + pad(trunc(m.name, nameW), nameW) + RST + bg + "  " + GRAY + m.command + " " + (m.args || []).join(" ") + RST, sel);
@@ -64,21 +64,21 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
     if (S.message) {
       pushFoot(messageLine(cols));
     }
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["Tab", "Switch"], ["?", "Help"], ["Q", "Quit"]]));
+    pushFoot("  " + rule(barW));
+    pushFoot(hints([["\u2191\u2193", "move"], ["enter", "select"], ["tab", "switch"], ["?", "help"], ["q", "quit"]]));
   } else {
     // Marketplace
     S.mcpItems = buildMcpList("All");
-    pushBody("  " + BOLD + WHITE + "MCP Marketplace (" + S.mcpItems.length + " available)" + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST) + "  " + CYAN + "✦" + RST + DIM + " = curated" + RST, false);
+    pushBody("  " + BOLD + WHITE + "MCP Marketplace" + RST + GRAY + " (" + S.mcpItems.length + " available)" + RST + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST) + "  " + ACCENT + "✦" + RST + DIM + " = curated" + RST, false);
     for (var i = 0; i < S.mcpItems.length; i++) {
       var m = S.mcpItems[i];
       var sel = i === S.mcpCursor;
-      var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+      var arrow = sel ? (ACCENT + " ❯ " + RST) : "   ";
       var bg = sel ? BG_SEL : "";
       var nameStyle = sel ? (BOLD + WHITE) : DIM;
-      var statusIcon = m.installed ? (GREEN + "\u25cf" + RST) : (GRAY + "\u25cb" + RST);
+      var statusIcon = m.installed ? (DIM + "\u25cf" + RST) : (GRAY + "\u25cb" + RST);
       // ✦ marks hand-picked entries; non-curated get 2 spaces to keep columns aligned
-      var curatedMark = m.curated ? (CYAN + "✦ " + RST) : "  ";
+      var curatedMark = m.curated ? (ACCENT + "✦ " + RST) : "  ";
       var starRaw = m.stars != null ? " ★" + m.stars : "";
       var starVis = starRaw.length;
       var usedW = 2 + 3 + 2 + 2 + nameW + 2 + starVis;
@@ -98,8 +98,8 @@ export function buildMcp(pushBody, pushFoot, cols, barW) {
     if (S.message) {
       pushFoot(messageLine(cols));
     }
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["/", "Search"], ["?", "Help"], ["Q", "Quit"]]));
+    pushFoot("  " + rule(barW));
+    pushFoot(hints([["↑↓", "move"], ["enter", "select"], ["/", "search"], ["?", "help"], ["q", "quit"]]));
   }
 }
 

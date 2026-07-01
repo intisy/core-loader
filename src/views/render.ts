@@ -2,7 +2,7 @@
 // Top-level frame renderer: builds header + tabs, dispatches to the active
 // page/overlay builder, applies viewport scrolling, and writes to stderr.
 
-import { E, RST, BOLD, DIM, GRAY, WHITE, CYAN, BG_SEL, CLR } from "../format.js";
+import { E, RST, BOLD, DIM, GRAY, WHITE, BG_SEL, CLR, ACCENT, rule } from "../format.js";
 import { S } from "../state.js";
 import { APP_NAME } from "../env.js";
 import { buildConfirm, buildHelp, updateSpinner } from "./common.js";
@@ -32,14 +32,14 @@ export function render() {
 
   // 1. Build Header
   pushHead("");
-  pushHead("  " + BOLD + CYAN + " " + APP_NAME + RST + GRAY + "  Loader" + RST);
-  pushHead("  " + GRAY + "-".repeat(barW) + RST);
+  pushHead("  " + BOLD + ACCENT + APP_NAME + RST + DIM + " · Loader" + RST);
+  pushHead("  " + rule(barW));
   var showPluginsTab = S.pluginItems.length > 0 || S.MARKETPLACE_CATALOG.length > 0;
-  var projTab = S.page === "projects" ? (BOLD + WHITE + BG_SEL + " Projects " + RST) : (GRAY + " Projects " + RST);
-  var plugTab = showPluginsTab ? (S.page === "plugins" ? (BOLD + WHITE + BG_SEL + " Plugins " + RST) : (GRAY + " Plugins " + RST)) : "";
-  var mcpTab = S.page === "mcp" ? (BOLD + WHITE + BG_SEL + " MCP " + RST) : (GRAY + " MCP " + RST);
-  var settingsTab = S.page === "settings" ? (BOLD + WHITE + BG_SEL + " Settings " + RST) : (GRAY + " Settings " + RST);
-  pushHead("  " + projTab + "  " + plugTab + "  " + mcpTab + "  " + settingsTab + "    " + DIM + "<- ->" + RST);
+  var projTab = S.page === "projects" ? (BOLD + ACCENT + BG_SEL + " Projects " + RST) : (GRAY + " Projects " + RST);
+  var plugTab = showPluginsTab ? (S.page === "plugins" ? (BOLD + ACCENT + BG_SEL + " Plugins " + RST) : (GRAY + " Plugins " + RST)) : "";
+  var mcpTab = S.page === "mcp" ? (BOLD + ACCENT + BG_SEL + " MCP " + RST) : (GRAY + " MCP " + RST);
+  var settingsTab = S.page === "settings" ? (BOLD + ACCENT + BG_SEL + " Settings " + RST) : (GRAY + " Settings " + RST);
+  pushHead("  " + projTab + "  " + plugTab + "  " + mcpTab + "  " + settingsTab + "    " + DIM + "← →" + RST);
   pushHead("");
 
   if (S.helpOpen) {
@@ -95,8 +95,8 @@ export function render() {
     // blank so it doesn't stack into a double gap above the tabs
     if (hiddenAbove === 0 && headLines.length && headLines[headLines.length - 1] === "") headLines.pop();
     var visibleBody = bodyLines.slice(activeScroll, activeScroll + innerH);
-    visibleBody.unshift(hiddenAbove > 0 ? "  " + GRAY + "     ^ " + hiddenAbove + " more" + RST : "");
-    visibleBody.push(hiddenBelow > 0 ? "  " + GRAY + "     v " + hiddenBelow + " more" + RST : "");
+    visibleBody.unshift(hiddenAbove > 0 ? "  " + GRAY + "     ↑ " + hiddenAbove + " more" + RST : "");
+    visibleBody.push(hiddenBelow > 0 ? "  " + GRAY + "     ↓ " + hiddenBelow + " more" + RST : "");
     bodyLines = visibleBody;
   }
 

@@ -2,7 +2,7 @@
 // Plugins page rendering: plugin rows (git + npm + engine), the installed /
 // marketplace / custom sub-pages, and the action/commit menus.
 
-import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, MAGENTA, BG_SEL, stringWidth, pad, trunc } from "../format.js";
+import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, RED, MAGENTA, BG_SEL, stringWidth, pad, trunc, ACCENT, rule } from "../format.js";
 import { selectionKey } from "../selection.js";
 import { S } from "../state.js";
 import { loadPlugins } from "../config.js";
@@ -12,14 +12,14 @@ import { hints, messageLine, spinnerFrame } from "./common.js";
 
 export function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
   var sel = i === S.pcursor;
-  var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+  var arrow = sel ? (ACCENT + " ❯ " + RST) : "   ";
   var bg = sel ? BG_SEL : "";
   var nameStyle = sel ? (BOLD + WHITE) : DIM;
 
   // NPM plugins: simpler read-only row
   if (pitem.type === "npm") {
     var nvstr = pitem.version ? (GRAY + "v" + pitem.version + RST) : (GRAY + "not installed" + RST);
-    var typeLabel = pitem.engine ? (MAGENTA + "engine" + RST) : (CYAN + "npm" + RST);
+    var typeLabel = pitem.engine ? (DIM + "engine" + RST) : (GRAY + "npm" + RST);
     pushBody("  " + bg + arrow + nameStyle + pad(trunc(pitem.name, nameW), nameW) + RST + bg + " " + typeLabel + "  " + nvstr + RST, isSelected);
     if (sel) {
       var subInfo = GRAY + "     " + (pitem.engine ? "manages plugin installs and updates" : "managed via npm (opencode.json)") + RST;
@@ -38,7 +38,7 @@ export function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
   }
   if (pitem.enabled) {
     if (pitem.updateAvail) {
-      statusParts.push(CYAN + "UPDATE" + RST);
+      statusParts.push(ACCENT + "UPDATE" + RST);
     } else if (pitem.deployed) {
       statusParts.push(GRAY + "ok" + RST);
     } else {
@@ -75,8 +75,8 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       pushBody("", false);
       pushBody("  Press " + BOLD + WHITE + "Enter" + RST + " to install the default updater plugin.", false);
       pushBody("", false);
-      pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-      pushFoot("  " + DIM + "Enter" + RST + " Install  " + DIM + "Q" + RST + " Quit");
+      pushFoot("  " + rule(barW));
+      pushFoot(hints([["enter", "install"], ["q", "quit"]]));
       S.globalKeyHandler = "updater_install";
       return;
     } else {
@@ -86,8 +86,8 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       pushBody("", false);
       pushBody("  Press " + BOLD + WHITE + "Enter" + RST + " to install the default updater plugin.", false);
       pushBody("", false);
-      pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-      pushFoot("  " + DIM + "Enter" + RST + " Install  " + DIM + "Q" + RST + " Quit");
+      pushFoot("  " + rule(barW));
+      pushFoot(hints([["enter", "install"], ["q", "quit"]]));
       S.globalKeyHandler = "updater_install";
       return;
     }
@@ -100,25 +100,25 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
     for (var i = 0; i < S.commitItems.length; i++) {
       var c = S.commitItems[i];
       var sel = i === S.ccursor;
-      var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+      var arrow = sel ? (ACCENT + " ❯ " + RST) : "   ";
       var bg = sel ? BG_SEL : "";
       var nameStyle = sel ? (BOLD + WHITE) : DIM;
       pushBody("  " + bg + arrow + nameStyle + c.hash + RST + bg + "  " + pad(c.time, 12) + "  " + trunc(c.subject, Math.max(10, cols - 30)) + RST, sel);
     }
     pushBody("", false);
-    
+
     if (S.message) {
       pushFoot(messageLine(cols));
     }
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Checkout"], ["Esc", "Cancel"]]));
+    pushFoot("  " + rule(barW));
+    pushFoot(hints([["↑↓", "move"], ["enter", "checkout"], ["esc", "cancel"]]));
     return;
   }
 
   if (S.mode === "pconfig" || S.mode === "pcfginput") {
     var ct = S.configTarget;
     var cname = (ct && ct.name) || "";
-    pushBody("  " + MAGENTA + "#" + GRAY + " Configure " + WHITE + trunc(cname, cols - 16) + RST, false);
+    pushBody("  " + BOLD + WHITE + "Configure " + trunc(cname, cols - 16) + RST, false);
     pushBody("  " + GRAY + "changes save to config/" + cname + ".json (restart to apply)" + RST, false);
     pushBody("", false);
     var keyW = 6;
@@ -133,16 +133,16 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       else if (it.type === "boolean") valStr = (it.value ? GREEN + "true" : RED + "false") + RST;
       else valStr = WHITE + JSON.stringify(it.value) + RST;
       var mark = it.isSet ? "" : (GRAY + " (default)" + RST);
-      var carrow = csel ? (YELLOW + " > " + RST) : "   ";
+      var carrow = csel ? (ACCENT + " ❯ " + RST) : "   ";
       var cbg = csel ? BG_SEL : "";
       var cNameStyle = csel ? (BOLD + WHITE) : DIM;
       pushBody("  " + cbg + carrow + cNameStyle + pad(trunc(it.key, keyW), keyW) + RST + cbg + "  " + valStr + mark + RST, csel);
     }
     pushBody("", false);
     if (S.message) pushFoot(messageLine(cols));
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    if (S.mode === "pcfginput") pushFoot(hints([["Enter", "Save"], ["Esc", "Cancel"]]));
-    else pushFoot(hints([["^v/WS", "Move"], ["Enter", "Edit/Toggle"], ["Esc", "Back"]]));
+    pushFoot("  " + rule(barW));
+    if (S.mode === "pcfginput") pushFoot(hints([["enter", "save"], ["esc", "cancel"]]));
+    else pushFoot(hints([["↑↓", "move"], ["enter", "edit/toggle"], ["esc", "back"]]));
     return;
   }
 
@@ -160,19 +160,19 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
       var pcat = pacts[pj].cat;
       if (pcat && pcat !== lastCat) {
         if (lastCat !== null) pushBody("", false);   // blank line between categories
-        pushBody("    " + BOLD + CYAN + pcat + RST, false);
+        pushBody("    " + BOLD + WHITE + pcat + RST, false);
         lastCat = pcat;
       }
       if (pj === S.pacursor) {
-        pushBody("    " + GREEN + "  > " + BOLD + pacts[pj].label + RST, true);
+        pushBody("    " + ACCENT + "❯ " + BOLD + ACCENT + pacts[pj].label + RST, true);
       } else {
-        pushBody("    " + GRAY + "    " + pacts[pj].label + RST, false);
+        pushBody("    " + DIM + "  " + pacts[pj].label + RST, false);
       }
     }
     pushBody("", false);
     if (S.message) pushFoot(messageLine(cols));
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
+    pushFoot("  " + rule(barW));
+    pushFoot(hints([["↑↓", "move"], ["enter", "confirm"], ["esc", "back"]]));
     return;
   }
 
@@ -181,20 +181,20 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
     pushBody("  " + GRAY + "Add plugins to ~/configDirPlaceholder/config/plugins.json" + RST, false);
     pushBody("", false);
     
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot("  " + GRAY + "Q" + RST + " Quit");
+    pushFoot("  " + rule(barW));
+    pushFoot(hints([["q", "quit"]]));
     return;
   }
 
-  var tabInstalled = S.pluginSubPage === "installed" ? (BOLD + WHITE + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
-  var tabMarketplace = S.pluginSubPage === "marketplace" ? (BOLD + WHITE + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
+  var tabInstalled = S.pluginSubPage === "installed" ? (BOLD + ACCENT + BG_SEL + " Installed " + RST) : (GRAY + " Installed " + RST);
+  var tabMarketplace = S.pluginSubPage === "marketplace" ? (BOLD + ACCENT + BG_SEL + " Marketplace " + RST) : (GRAY + " Marketplace " + RST);
   var tabsLine = "  " + tabInstalled + "  " + tabMarketplace;
   for (var cti = 0; cti < S.customTabs.length; cti++) {
     var ctab = S.customTabs[cti];
-    var ctStr = S.pluginSubPage === ctab.id ? (BOLD + WHITE + BG_SEL + " " + ctab.label + " " + RST) : (GRAY + " " + ctab.label + " " + RST);
+    var ctStr = S.pluginSubPage === ctab.id ? (BOLD + ACCENT + BG_SEL + " " + ctab.label + " " + RST) : (GRAY + " " + ctab.label + " " + RST);
     tabsLine += "  " + ctStr;
   }
-  tabsLine += "    " + DIM + "Tab" + RST + " switch";
+  tabsLine += "    " + DIM + "tab switch" + RST;
     pushBody(tabsLine, false);
   pushBody("", false);
 
@@ -215,18 +215,18 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
           var a = mkActs[ai];
           var aSel = ai === S.mkAcursor;
           if (aSel) {
-            pushBody("    " + GREEN + "  > " + BOLD + a.label + RST, true);
+            pushBody("    " + ACCENT + "❯ " + BOLD + ACCENT + a.label + RST, true);
           } else {
-            pushBody("    " + GRAY + "    " + a.label + RST, false);
+            pushBody("    " + DIM + "  " + a.label + RST, false);
           }
         }
         pushBody("", false);
-        pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-        pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
+        pushFoot("  " + rule(barW));
+        pushFoot(hints([["↑↓", "move"], ["enter", "confirm"], ["esc", "back"]]));
         return;
       }
     }
-    pushBody("  " + BOLD + WHITE + "Marketplace (" + S.marketplaceItems.length + " available)" + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST), false);
+    pushBody("  " + BOLD + WHITE + "Marketplace" + RST + GRAY + " (" + S.marketplaceItems.length + " available)" + RST + (S.mode === "search" || S.inputBuf ? " " + BG_SEL + " Search: " + S.inputBuf + (S.mode === "search" ? "_" : "") + " " + RST : " " + DIM + "(press / to search)" + RST), false);
     if (S.marketplaceItems.length === 0) {
       if (S.inputBuf) {
         pushBody("  " + GRAY + "No results for \"" + S.inputBuf + "\"" + RST, false);
@@ -244,48 +244,50 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
 
       // emit a non-selectable section header whenever the group changes
       if (group !== lastGroup) {
+        pushBody("", false);
         if (group === "official") {
-          pushBody("  " + BOLD + CYAN + "  Official · intisy-ai" + RST, false);
+          pushBody("  " + BOLD + WHITE + "Official" + RST + GRAY + " · intisy-ai" + RST, false);
         } else {
-          pushBody("  " + BOLD + GRAY + "  Community" + RST, false);
+          pushBody("  " + BOLD + WHITE + "Community" + RST, false);
         }
         lastGroup = group;
       }
 
       var msel = mi === S.mkCursor;
-      var marrow = msel ? (YELLOW + " > " + RST) : "   ";
+      var marrow = msel ? (ACCENT + " ❯ " + RST) : "   ";
       var mbg = msel ? BG_SEL : "";
       var mns = msel ? (BOLD + WHITE) : DIM;
       var starRaw = mitem.stars != null ? " ★" + mitem.stars : "";
       var starVis = starRaw.length;
       var mkNameW = Math.min(30, nameW);
       // official badge "◆ " occupies 2 chars; non-official gets 2 spaces to keep columns aligned
-      var officialBadge = mitem.official ? (MAGENTA + "◆ " + RST) : "  ";
+      var officialBadge = mitem.official ? (ACCENT + "◆ " + RST) : "  ";
       var officialBadgeW = 2;
-      // 4-char selection slot, kept aligned on every row
-      var checkbox = mitem.installed ? "    "
-        : (S.mkSelected[selectionKey(mitem)] ? (GREEN + "[x] " + RST) : (GRAY + "[ ] " + RST));
-      var checkboxW = 4;
-      var usedW = 2 + 3 + checkboxW + 2 + officialBadgeW + mkNameW + 2 + starVis;
+      // 2-char selection slot: selected accent dot, selectable faint dot, installed blank
+      var checkbox = mitem.installed ? "  "
+        : (S.mkSelected[selectionKey(mitem)] ? (ACCENT + "◉ " + RST) : (DIM + "· " + RST));
+      var checkboxW = 2;
+      var usedW = 2 + 3 + checkboxW + 1 + 1 + officialBadgeW + mkNameW + 2 + starVis;
       var descW = Math.max(10, cols - usedW - 2);
       var descText = trunc((mitem.desc || "").replace(/\r?\n/g, " "), descW);
       var descVis = stringWidth(descText);
       var gapW = Math.max(1, cols - usedW - descVis);
       var starStr = starRaw ? (YELLOW + " ".repeat(gapW) + "★" + mitem.stars + RST) : "";
-      var mIcon = mitem.installed ? (GREEN + "●" + RST) : (GRAY + "○" + RST);
+      var mIcon = mitem.installed ? (DIM + "●" + RST) : (GRAY + "○" + RST);
       pushBody("  " + mbg + marrow + checkbox + mIcon + " " + officialBadge + mns + pad(trunc(mitem.name, mkNameW), mkNameW) + RST + mbg + "  " + GRAY + descText + RST + starStr + RST, msel);
       if (msel && mitem.url) {
-        pushBody("  " + GRAY + "         " + trunc(mitem.url, cols - 10) + RST, msel);
+        // indent to align under the name column: 2("  ") + 3(cursor) + 2(select) + 1(icon) + 1(space) + 2(badge) = 11
+        pushBody("  " + GRAY + "         " + trunc(mitem.url, cols - 11) + RST, msel);
       }
     }
     pushBody("", false);
     if (S.message) { pushFoot(messageLine(cols)); }
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+    pushFoot("  " + rule(barW));
     var selCount = Object.keys(S.mkSelected).length;
     if (selCount > 0) {
-      pushFoot("  " + BOLD + GREEN + selCount + " selected" + RST + GRAY + " · Space: toggle · i: install selected" + RST);
+      pushFoot("  " + BOLD + ACCENT + selCount + " selected" + RST + GRAY + " · space toggle · i install · esc back" + RST);
     }
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["Space", "Select"], ["/", "Search"], ["?", "Help"], ["Q", "Quit"]]));
+    pushFoot(hints([["↑↓", "move"], ["enter", "select"], ["space", "select"], ["/", "search"], ["?", "help"], ["q", "quit"]]));
     return;
   }
 
@@ -323,14 +325,14 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
   }
 
   var npmCount = S.pluginItems.filter(function(p) { return p.type === "npm"; }).length;
-  pushBody("  " + BOLD + WHITE + "Plugins " +
+  pushBody("  " + BOLD + WHITE + "Plugins" + RST + " " +
       GRAY + "(" + autoCount + " auto, " + manualCount + " manual, " + disabledCount + " disabled" +
-      (updateCount > 0 ? ", " + CYAN + updateCount + " updates" + GRAY : "") +
+      (updateCount > 0 ? ", " + ACCENT + updateCount + " updates" + GRAY : "") +
       (npmCount > 0 ? ", " + GRAY + npmCount + " npm" + GRAY : "") +
       ")" + RST, false);
 
   if (!S.pluginFetched) {
-    pushBody("  " + GRAY + "  Press " + RST + "F" + GRAY + " to check for updates" + RST, false);
+    pushBody("  " + DIM + "Press F to check for updates" + RST, false);
   }
 
   var lastWasGit = false;
@@ -348,13 +350,13 @@ export function buildPlugins(pushBody, pushFoot, cols, barW) {
   if (S.message) {
     pushFoot(messageLine(cols));
   }
-  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
+  pushFoot("  " + rule(barW));
 
   if (S.mode === "pinput") {
-    pushFoot("  " + CYAN + "Plugin git URL: " + RST + S.inputBuf + BOLD + "|" + RST);
-    pushFoot(hints([["Enter", "Add"], ["Esc", "Cancel"]]));
+    pushFoot("  " + ACCENT + "Plugin git URL: " + RST + S.inputBuf + BOLD + "|" + RST);
+    pushFoot(hints([["enter", "add"], ["esc", "cancel"]]));
   } else {
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["Tab", "Switch"], ["?", "Help"], ["Q", "Quit"]]));
+    pushFoot(hints([["↑↓", "move"], ["enter", "select"], ["tab", "switch"], ["?", "help"], ["q", "quit"]]));
   }
 }
 

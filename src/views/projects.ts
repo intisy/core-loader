@@ -2,7 +2,7 @@
 // Projects page rendering: each project row, the "open here" row, and the
 // full projects view with its action menu and footer.
 
-import { RST, BOLD, DIM, GRAY, WHITE, YELLOW, GREEN, CYAN, BLUE, BG_SEL, pad, trunc, timeAgo } from "../format.js";
+import { RST, BOLD, DIM, GRAY, WHITE, BG_SEL, pad, trunc, timeAgo, ACCENT, rule } from "../format.js";
 import { S } from "../state.js";
 import { APP_NAME } from "../env.js";
 import { getActions, shortPath } from "../projects.js";
@@ -10,12 +10,12 @@ import { hints, messageLine } from "./common.js";
 
 export function buildProjectItem(pushBody, i, item, nameW, cols, isSelected) {
   var sel = i === S.cursor;
-  var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+  var arrow = sel ? (ACCENT + " ❯ " + RST) : "   ";
   var bg = sel ? BG_SEL : "";
   var nameStyle = sel ? (BOLD + WHITE) : DIM;
   var sessStr = GRAY + pad(item.sessions + " sess", 8) + RST;
   var timeStr = GRAY + pad(timeAgo(item.lastUsed), 9) + RST;
-  var pinMark = item.pinned ? (YELLOW + " *" + RST) : "";
+  var pinMark = item.pinned ? (ACCENT + " *" + RST) : "";
 
   pushBody("  " + bg + arrow + nameStyle + pad(trunc(item.name, nameW), nameW) + RST + bg + sessStr + timeStr + pinMark + RST, isSelected);
 
@@ -31,9 +31,9 @@ export function buildProjectItem(pushBody, i, item, nameW, cols, isSelected) {
       var aSel = j === S.acursor;
       var lbl = trunc(a.label, cols - 12);
       if (aSel) {
-        pushBody("    " + GREEN + "  > " + BOLD + lbl + RST, isSelected);
+        pushBody("    " + ACCENT + "❯ " + BOLD + ACCENT + lbl + RST, isSelected);
       } else {
-        pushBody("    " + GRAY + "    " + lbl + RST, isSelected);
+        pushBody("    " + DIM + "  " + lbl + RST, isSelected);
       }
     }
     pushBody("", isSelected);
@@ -42,7 +42,7 @@ export function buildProjectItem(pushBody, i, item, nameW, cols, isSelected) {
 
 export function buildOpenHereItem(pushBody) {
   var sel = S.cursor === S.items.length;
-  var arrow = sel ? (YELLOW + " > " + RST) : "   ";
+  var arrow = sel ? (ACCENT + " ❯ " + RST) : "   ";
   var bg = sel ? BG_SEL : "";
   var nameStyle = sel ? (BOLD + WHITE) : DIM;
   pushBody("  " + bg + arrow + nameStyle + "Open " + APP_NAME + " here" + RST + bg + "  " + GRAY + process.cwd() + RST, sel);
@@ -58,8 +58,8 @@ export function buildProjects(pushBody, pushFoot, cols, barW) {
     buildOpenHereItem(pushBody);
     pushBody("", false);
 
-    pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-    pushFoot(hints([["Enter", "Select"], ["U", "Unhide all"], ["Q", "Quit"]]));
+    pushFoot("  " + rule(barW));
+    pushFoot(hints([["enter", "select"], ["u", "unhide all"], ["q", "quit"]]));
     return;
   }
 
@@ -68,7 +68,7 @@ export function buildProjects(pushBody, pushFoot, cols, barW) {
   var recentCount = S.items.length - pinnedCount;
 
   if (pinnedCount > 0) {
-    pushBody("  " + YELLOW + "*" + GRAY + " Pinned" + RST, false);
+    pushBody("  " + BOLD + WHITE + "Pinned" + RST, false);
     for (var i = 0; i < pinnedCount; i++) {
       buildProjectItem(pushBody, i, S.items[i], nameW, cols, i === S.cursor);
     }
@@ -78,7 +78,7 @@ export function buildProjects(pushBody, pushFoot, cols, barW) {
 
   if (recentCount > 0) {
     var countLabel = recentCount > 0 ? " (" + recentCount + ")" : "";
-    pushBody("  " + BLUE + "~" + GRAY + " Recent" + countLabel + RST, false);
+    pushBody("  " + BOLD + WHITE + "Recent" + RST + GRAY + countLabel + RST, false);
     for (var i = pinnedCount; i < S.items.length; i++) {
       buildProjectItem(pushBody, i, S.items[i], nameW, cols, i === S.cursor);
     }
@@ -91,18 +91,18 @@ export function buildProjects(pushBody, pushFoot, cols, barW) {
   if (S.message) {
     pushFoot(messageLine(cols));
   }
-  pushFoot("  " + GRAY + "-".repeat(barW) + RST);
-  
+  pushFoot("  " + rule(barW));
+
   if (S.mode === "input") {
     var inputLabel = S.chpathDir ? "New path: " : "Path: ";
     var maxInput = Math.max(10, cols - 15 - inputLabel.length);
     var displayInput = S.inputBuf.length > maxInput ? "…" + S.inputBuf.substring(S.inputBuf.length - maxInput + 1) : S.inputBuf;
-    pushFoot("  " + CYAN + inputLabel + RST + displayInput + BOLD + "|" + RST);
-    pushFoot(hints([["Enter", "Confirm"], ["Esc", "Cancel"]]));
+    pushFoot("  " + ACCENT + inputLabel + RST + displayInput + BOLD + "|" + RST);
+    pushFoot(hints([["enter", "confirm"], ["esc", "cancel"]]));
   } else if (S.mode === "list") {
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Select"], ["O", "Open"], ["?", "Help"], ["Q", "Quit"]]));
+    pushFoot(hints([["↑↓", "move"], ["enter", "select"], ["o", "open"], ["?", "help"], ["q", "quit"]]));
   } else {
-    pushFoot(hints([["^v/WS", "Move"], ["Enter", "Confirm"], ["Esc", "Back"]]));
+    pushFoot(hints([["↑↓", "move"], ["enter", "confirm"], ["esc", "back"]]));
   }
 }
 
