@@ -90,9 +90,16 @@ export function saveConfig(cfg) {
 var GLOBAL_SETTINGS_FILE = join(CONFIG_FOLDER, "settings.json");
 export var GLOBAL_SETTINGS_DEFAULTS = { logConsole: false, logColor: true };
 
+// Cached parsed settings so a navigation render (buildSettings reads these every
+// frame) never re-reads settings.json from disk. Invalidated when setGlobalSetting writes.
+var GLOBAL_SETTINGS_CACHE = null;
+
 export function loadGlobalSettings() {
-  try { if (existsSync(GLOBAL_SETTINGS_FILE)) return JSON.parse(readFileSync(GLOBAL_SETTINGS_FILE, "utf-8")) || {}; } catch {}
-  return {};
+  if (GLOBAL_SETTINGS_CACHE !== null) return GLOBAL_SETTINGS_CACHE;
+  var out = {};
+  try { if (existsSync(GLOBAL_SETTINGS_FILE)) out = JSON.parse(readFileSync(GLOBAL_SETTINGS_FILE, "utf-8")) || {}; } catch {}
+  GLOBAL_SETTINGS_CACHE = out;
+  return out;
 }
 
 // parse a CLI/edit string into the obvious type (mirrors core's coerce)
@@ -111,6 +118,7 @@ export function setGlobalSetting(key, valueStr) {
     cur[key] = coerceGlobal(valueStr);
     if (!existsSync(CONFIG_FOLDER)) mkdirSync(CONFIG_FOLDER, { recursive: true });
     writeFileSync(GLOBAL_SETTINGS_FILE, JSON.stringify(cur, null, 2));
+    GLOBAL_SETTINGS_CACHE = null;   // next read reflects the write
     return "";
   } catch (e) { return (e && e.message) || "set failed"; }
 }

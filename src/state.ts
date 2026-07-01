@@ -77,6 +77,10 @@ export const S = {
   // key handling (see handleKey) so the user stays put and can't fire more work.
   busy: false,
 
+  // Cached "is the updater plugin present" result. The check reads disk + can shell
+  // out, so it must never run on a navigation render — computed until true, then held.
+  hasUpdater: false,
+
   // Status message + render scheduling
   message: "",
   msgTimeout: null,

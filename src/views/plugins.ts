@@ -63,11 +63,20 @@ export function buildPluginItem(pushBody, i, pitem, nameW, cols, isSelected) {
 export function buildPlugins(pushBody, pushFoot, cols, barW) {
   var nameW = Math.min(32, Math.max(20, cols - 44));
 
-  var plugins = loadPlugins();
-  var hasUpdater = plugins.some(function(p) { return p.name.includes("updater") || (p.url && p.url.includes("updater")); })
-    || loadNpmPlugins().some(function(p) { return p.name.includes("updater"); })
-    || !!getUpdater();
-  
+  // The hasUpdater check reads disk (loadPlugins/loadNpmPlugins) and can shell out
+  // (npm root -g) — far too costly to run on every render, which is what made cursor
+  // navigation lag. Cache it: recompute only while it isn't yet true (i.e. on the
+  // "updater missing" prompt, which has no list to navigate). Once the updater is
+  // present it can't vanish mid-session, so the true result is cached permanently and
+  // no navigation render touches the disk.
+  if (S.hasUpdater !== true) {
+    var plugins = loadPlugins();
+    S.hasUpdater = plugins.some(function(p) { return p.name.includes("updater") || (p.url && p.url.includes("updater")); })
+      || loadNpmPlugins().some(function(p) { return p.name.includes("updater"); })
+      || !!getUpdater();
+  }
+  var hasUpdater = S.hasUpdater;
+
   if (!hasUpdater) {
     if (process.env.CC_LAUNCHER === "1") {
       pushBody("  " + BOLD + RED + "Updater Plugin Missing" + RST, false);
