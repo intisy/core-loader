@@ -24,7 +24,7 @@ export function handleKey(key) {
   if (key === "?" && S.mode === "list") { S.helpOpen = true; return; }
   // Page switching with left/right (only in list mode, not in actions/input)
   if ((S.mode === "list") && (key === "left" || key === "right")) {
-    var pages = ["projects", "plugins", "mcp"];
+    var pages = ["projects", "plugins", "mcp", "settings"];
     var pi = pages.indexOf(S.page);
     if (key === "left" && pi > 0) { S.page = pages[pi - 1]; S.mode = "list"; render(); return; }
     if (key === "right" && pi < pages.length - 1) { S.page = pages[pi + 1]; S.mode = "list"; render(); return; }
@@ -37,6 +37,8 @@ export function handleKey(key) {
     handleProjectKey(key);
   } else if (S.page === "mcp") {
     handleMcpKey(key);
+  } else if (S.page === "settings") {
+    handleSettingsKey(key);
   } else {
     handlePluginKey(key);
   }
@@ -660,6 +662,49 @@ export function handleConfirmKey(key) {
     S.confirmCursor = 0;
     S.mode = "list";
     flash("Cancelled.");
+  }
+}
+
+export function handleSettingsKey(key) {
+  if (S.mode === "pconfig" || S.mode === "pcfginput") {
+    // Delegate to the shared config editor handler (same UX as plugin configure).
+    // pconfig: cursor navigation + boolean toggle / open text input
+    // pcfginput: captured entirely by handleConfigInputData in the onData router
+    var citem = S.configItems[S.cfgcursor];
+    if (key === "up" || key === "w") { S.cfgcursor = Math.max(0, S.cfgcursor - 1); }
+    else if (key === "down" || key === "s") { S.cfgcursor = Math.min(S.configItems.length - 1, S.cfgcursor + 1); }
+    else if (key === "escape" || key === "q" || key === "left") { S.mode = "list"; }
+    else if ((key === "enter" || key === "space") && citem) {
+      if (citem.type === "boolean") {
+        var nv = !citem.value;
+        var berr = setGlobalSetting(citem.key, nv ? "true" : "false");
+        if (berr) { flash(citem.key + ": " + berr); }
+        else { refreshConfigItems(); flash(citem.key + " = " + nv + " (restart to apply)"); }
+      } else {
+        S.configEditKey = citem.key;
+        S.inputBuf = (citem.value === undefined || citem.value === null) ? "" : String(citem.value);
+        S.mode = "pcfginput";
+      }
+    }
+    return;
+  }
+
+  // list mode: cursor + enter to open the config editor for global settings
+  if (key === "q" || key === "escape") { cleanup(); process.exit(1); return; }
+  if (key === "up" || key === "w") { S.settingsCursor = Math.max(0, S.settingsCursor - 1); }
+  else if (key === "down" || key === "s") {
+    var items = buildConfigItems({ defaults: GLOBAL_SETTINGS_DEFAULTS, current: loadGlobalSettings() });
+    S.settingsCursor = Math.min(items.length - 1, S.settingsCursor + 1);
+  }
+  else if (key === "enter" || key === "space") {
+    var sitems = buildConfigItems({ defaults: GLOBAL_SETTINGS_DEFAULTS, current: loadGlobalSettings() });
+    if (sitems.length > 0) {
+      S.configTarget = { name: "settings", global: true, items: sitems };
+      S.configItems = sitems;
+      S.cfgcursor = S.settingsCursor;
+      S.cfgScrollOff = 0;
+      S.mode = "pconfig";
+    }
   }
 }
 

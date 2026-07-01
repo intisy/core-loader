@@ -56,6 +56,10 @@ export const S = {
   mcpMode: "catalog",
   mcpAcursor: 0,
 
+  // Settings page (global settings editor)
+  settingsCursor: 0,
+  settingsScrollOff: 0,
+
   // Marketplace sub-page
   marketplaceItems: [],
   mkCursor: 0,

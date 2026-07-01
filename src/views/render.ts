@@ -9,6 +9,7 @@ import { buildConfirm, buildHelp, updateSpinner } from "./common.js";
 import { buildProjects } from "./projects.js";
 import { buildPlugins } from "./plugins.js";
 import { buildMcp } from "./mcp.js";
+import { buildSettings } from "./settings.js";
 
 export function render() {
   var cols = process.stderr.columns || 80;
@@ -37,7 +38,8 @@ export function render() {
   var projTab = S.page === "projects" ? (BOLD + WHITE + BG_SEL + " Projects " + RST) : (GRAY + " Projects " + RST);
   var plugTab = showPluginsTab ? (S.page === "plugins" ? (BOLD + WHITE + BG_SEL + " Plugins " + RST) : (GRAY + " Plugins " + RST)) : "";
   var mcpTab = S.page === "mcp" ? (BOLD + WHITE + BG_SEL + " MCP " + RST) : (GRAY + " MCP " + RST);
-  pushHead("  " + projTab + "  " + plugTab + "  " + mcpTab + "    " + DIM + "<- ->" + RST);
+  var settingsTab = S.page === "settings" ? (BOLD + WHITE + BG_SEL + " Settings " + RST) : (GRAY + " Settings " + RST);
+  pushHead("  " + projTab + "  " + plugTab + "  " + mcpTab + "  " + settingsTab + "    " + DIM + "<- ->" + RST);
   pushHead("");
 
   if (S.helpOpen) {
@@ -48,6 +50,8 @@ export function render() {
     buildProjects(pushBody, pushFoot, cols, barW);
   } else if (S.page === "mcp") {
     buildMcp(pushBody, pushFoot, cols, barW);
+  } else if (S.page === "settings") {
+    buildSettings(pushBody, pushFoot, cols, barW);
   } else {
     buildPlugins(pushBody, pushFoot, cols, barW);
   }
@@ -64,6 +68,7 @@ export function render() {
   var activeScroll = 0;
   if (S.page === "projects") activeScroll = S.scrollOff;
   else if (S.page === "mcp") activeScroll = S.mcpScrollOff;
+  else if (S.page === "settings") activeScroll = S.settingsScrollOff;
   else if (S.mode === "pcommits") activeScroll = S.cscrollOff;
   else if (S.page === "plugins" && S.pluginSubPage === "marketplace") activeScroll = S.mkScrollOff;
   else activeScroll = S.pscrollOff;
@@ -79,6 +84,7 @@ export function render() {
 
     if (S.page === "projects") S.scrollOff = activeScroll;
     else if (S.page === "mcp") S.mcpScrollOff = activeScroll;
+    else if (S.page === "settings") S.settingsScrollOff = activeScroll;
     else if (S.mode === "pcommits") S.cscrollOff = activeScroll;
     else if (S.page === "plugins" && S.pluginSubPage === "marketplace") S.mkScrollOff = activeScroll;
     else S.pscrollOff = activeScroll;
